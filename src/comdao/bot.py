@@ -337,7 +337,7 @@ class ModuleRequestModal(discord.ui.Modal):
         last_submission_times[user_id] = current_time
 
         # Send the embed to the specific channel
-        channel_id = 1219329785344426189
+        channel_id = NOMINATOR_CHANNEL_ID
         channel = interaction.guild.get_channel(channel_id)
         await channel.send(embed=embed)
 
