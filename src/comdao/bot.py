@@ -15,38 +15,6 @@ from substrateinterface import Keypair
 from communex.types import Ss58Address
 from communex.key import is_ss58_address
 
-"""
-Logic: 
-    # Storage:
-    Bot holds all private keys that are stored as enviroment variables,
-    these keys has to add up to the exact multisignature address of the
-    `whitelist_nominator`. 
-    This address is stored as a global parameter.
-    
-    # Discord
-
-    Anyone can use the command:
-
-    - /apply you fill in 
-            - ss58 address of the module
-            - what your module does
-            - module endpoint information
-            - team members. (developers of the module)
-            - github, gitlab, or any other repository link, code has to be open source
-
-    Afterwards, bot displays nicely formatted message and the ss58 address of the module will be the request id.
-
-    People that have the "module_nominator" role in the discord server.
-    Can use these types of commands:
-    
-    - [x] /nominate  `ss58 key` (starts ticket of nominating a module for whitelist)
-    - [x] /remove `ss58 key`, `reason` (starts ticket of removing a module from whitelist)
-    - [ ] /addvoter  `discord tag` (creates new multisig key and bot DMs the user with intro (guideline and commands))  
-    - [ ] /kickvoter `discord tag` (deletes associated multisig key and bot DMs user with info he was removed)
-    - [ ] /stats (lists table of members and their multisig_participation_count and multisig_abscence_count, ranked by participation)
-    - [ ] /help (posts info message)
-"""
-
 # constants
 MNEMONICS = os.environ['MNEMONICS'].split(',')
 BOT_TOKEN = os.environ['DISCORD_BOT_TOKEN']
