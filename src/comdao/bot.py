@@ -277,9 +277,10 @@ class ModuleRequestModal(discord.ui.Modal):
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self.add_item(discord.ui.InputText(label="SS58 Address of the Module"))
-        self.add_item(discord.ui.InputText(label="What your module does"))
         self.add_item(discord.ui.InputText(
-            label="Module Endpoint Information"))
+            label="What your module does", style=discord.InputTextStyle.long))
+        self.add_item(discord.ui.InputText(
+            label="Module API docs", style=discord.InputTextStyle.long))
         self.add_item(discord.ui.InputText(
             label="Team Members (Developers of the Module)"))
         self.add_item(discord.ui.InputText(
