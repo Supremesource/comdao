@@ -1,1 +1,4 @@
-.envrc
+/.direnv
+/data
+
+/env/**/*.env
