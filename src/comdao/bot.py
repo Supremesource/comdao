@@ -11,55 +11,55 @@ from discord.ext import commands
 import validators
 
 from substrateinterface import Keypair
+from substrateinterface.base import ExtrinsicReceipt
 
-from communex.types import Ss58Address
 from communex.key import is_ss58_address
+from communex.client import CommuneClient
+from communex.compat.key import classic_load_key
+from communex.types import NetworkParams, Ss58Address
 
+# 5H8ae6DK7kAdoa89V4BeR3fDtzajNurhVJDVc2TzLsCENGHs
 # constants
-MNEMONICS = os.environ['MNEMONICS'].split(',')
+MNEMONIC = os.environ['MNEMONIC']
 BOT_TOKEN = os.environ['DISCORD_BOT_TOKEN']
 GUILD_ID = str(os.environ['DISCORD_GUILD_ID'])
-REQUEST_CHANNEL_ID = int(os.environ['REQUEST_CHANNEL_ID'])
-NOMINATOR_CHANNEL_ID = int(os.environ['NOMINATOR_CHANNEL_ID'])
+REQUEST_CHANNEL_ID = int(os.environ['DISCORD_REQUEST_CHANNEL_ID'])
+NOMINATOR_CHANNEL_ID = int(os.environ['DISCORD_NOMINATOR_CHANNEL_ID'])
 
-INTENTS = discord.Intents.default()
+ROLE_NAME = "nominator"
+NODE_URL = "ws://127.0.0.1:9944" # "wss://commune.api.onfinality.io/public-ws"
+
+INTENTS = discord.Intents.all()
 BOT = commands.Bot(command_prefix="/", intents=INTENTS)
 
 # module request storage
 request_ids: list[Ss58Address] = []
-# discord_user_id : list[multisig_key_used, voted_ticket_id]
-nomination_approvals: dict[str, list[tuple[Ss58Address, Ss58Address]]] = {}
+# discord_user_id : voted_ticket_id
+nomination_approvals: dict[str, list[Ss58Address]] = {}
+removal_approvals: dict[str, list[Ss58Address]] = {}
+
 last_submission_times = {}
 
 
-def whitelist() -> list[Ss58Address]:
+async def whitelist() -> list[Ss58Address]:
+    "x"
+    client = CommuneClient(NODE_URL)
     # Get the whitelist from the blockchain
     # TODO: Implement this
-    return []
+    legit_whitelist = client.query("LegitWhitelist", params=[])
+    return legit_whitelist
 
-
-def send_call(keypair: Keypair, call: dict) -> None:
+async def send_call(fn: str, keypair: Keypair, call: dict) -> None:
+    "x"
     # Send the call to the blockchain
-    print(f"Sending call {call} with keypair {keypair.ss58_address}")
-    pass
-
-
-def get_keys() -> tuple[list[Any], int]:  #  keypairs, threshold
-    # Load the keypairs from enviroment variables
-    signatories_count = len(MNEMONICS)
-    assert signatories_count > 2, 'You need at least 3 private keys to run the bot'
-    assert signatories_count % 3 == 0, 'The number of private keys must be a multiple of 3'
-    threshold = int(signatories_count / 3) * 2
-    keypairs = [Keypair.create_from_mnemonic(
-        mnemonic) for mnemonic in MNEMONICS]
-    return keypairs, threshold
-
-
-keypairs, threshold = get_keys()
-
+    client = CommuneClient(NODE_URL)
+    response = client.compose_call(fn=fn, params=call, key=keypair)
+    print(f"response of the function {fn} is {response}")
+    return response
 
 @BOT.event
 async def on_ready() -> None:
+    "x"
     print(f"{BOT.user} is now online!")
     await setup_module_request_ui()
 
@@ -67,6 +67,7 @@ async def on_ready() -> None:
 @BOT.slash_command(guild_ids=[GUILD_ID],  # !!! make sure to pass as string
                    description="Help command")
 async def helpnominate(ctx) -> None:
+    "x"
     help_message = """
 🚀 **Available Commands:**
 
@@ -103,13 +104,14 @@ async def helpnominate(ctx) -> None:
 @BOT.slash_command(guild_ids=[GUILD_ID],  # !!! make sure to pass as string
                    description="Lists member stats based on multisig participation.")
 async def stats(ctx) -> None:
+    "x"
     member_stats = defaultdict(
         lambda: {"participation_count": 0, "absence_count": 0})
 
     for user_id, approvals in nomination_approvals.items():
         member = await ctx.guild.fetch_member(user_id)
         if member:
-            for multisig_key, _ in approvals:
+            for _, _ in approvals:
                 member_stats[member.id]["participation_count"] += 1
 
     total_tickets = len(request_ids)
@@ -125,11 +127,11 @@ async def stats(ctx) -> None:
         "Member", "Multisig Participation Count", "Multisig Absence Count")
     table += "-" * 90 + "\n"
 
-    for member_id, stats in sorted_stats:
+    for member_id, stat in sorted_stats:
         member = await ctx.guild.fetch_member(member_id)
         if member:
             table += "| {:<25} | {:<30} | {:<25} |\n".format(
-                member.name, stats['participation_count'], stats['absence_count'])
+                member.name, stat['participation_count'], stat['absence_count'])
 
     table += "```"
 
@@ -140,120 +142,130 @@ async def stats(ctx) -> None:
                    description="Nominates module to a whitelist.",
                    manage_roles=True)
 async def nominate(ctx, module_key: str) -> None:
+    "x"
     if ctx.channel.id != NOMINATOR_CHANNEL_ID:
-        await ctx.respond("This command can only be used in the designated channel.", ephemeral=True)
+        await ctx.respond("This command can only be used in the designated channel.",
+                           ephemeral=True)
         return
 
-    member = await ctx.guild.fetch_member(ctx.author.id)
-    role = discord.utils.get(ctx.guild.roles, name="nominator")
-
-    if role not in member.roles:
+    role = discord.utils.get(ctx.guild.roles, name=ROLE_NAME)
+    if role not in ctx.author.roles:
         await ctx.respond("You don't have the required role to use this command.", ephemeral=True)
         return
+
+    signatores_count = len(role.members)
+    threshold = signatores_count // 2 + 1
 
     if not is_ss58_address(module_key):
         await ctx.respond("Invalid module key.", ephemeral=True)
         return
 
-    nominated_modules = [approval[1]
-                         for approval in nomination_approvals.get(ctx.author.id, [])]
+    nominated_modules = [approval[1] for approval in nomination_approvals.get(ctx.author.id, [])]
     if module_key in nominated_modules:
         await ctx.respond(f"You have already nominated {module_key}.", ephemeral=True)
         return
 
     if module_key not in request_ids:
-        await ctx.respond(f"Module key {module_key} is not not submitted for access, open a request.", ephemeral=True)
+        await ctx.respond(
+            f"Module key {module_key} is not submitted for access, open a request.",
+            ephemeral=True
+        )
         return
 
-    signatores_addys = [keypair.ss58_address for keypair in keypairs]
-    free_signatories = [signatory for signatory in signatores_addys if signatory not in [
-        approval[0] for approval in nomination_approvals.get(ctx.author.id, [])]]
-    current_addy = random.choice(free_signatories)
-    current_keypair = [
-        keypair for keypair in keypairs if keypair.ss58_address == current_addy][0]
+    current_whitelist = await whitelist()
+    if module_key in current_whitelist:
+        await ctx.respond(f"Module key {module_key} is already whitelisted", ephemeral=True)
+        return
 
-    nomination_approvals.setdefault(
-        ctx.author.id, []).append((current_addy, module_key))
-    agreement_count: int = 0
-    for _, approvals in nomination_approvals.items():
-        for _, module in approvals:
-            if module == module_key:
-                agreement_count += 1
+    agreement_count = sum(module == module_key for approvals
+                          in nomination_approvals.values() for _, module in approvals)
+    onchain_message = (
+        "Multisig is now adding this module onchain, it will soon start getting votes."
+        if agreement_count == threshold
+        else "Still waiting for more votes, before executing onchain."
+    )
 
-    onchain_message = "Multisig is now adding this module onchain, it will soon start getting votes." if agreement_count == threshold else "Still waiting for more votes, before executing onchain."
+    await ctx.respond(
+        f"Nominator {ctx.author.mention} accepted module `{module_key}`.\n"
+        f"This is the `{agreement_count}` agreement out of `{threshold}` threshold.\n"
+        f"{onchain_message}"
+    )
 
-    await ctx.respond(f"Nominator {ctx.author.mention} accepted module `{module_key}`. This is the `{agreement_count}` agreement out of `{threshold}` threshold."
-                      f"\n{onchain_message}")
-    call = {
-        "call_module": "SubspaceModule",
-        "call_function": "add_to_whitelist",
-        "call_args": {
-            "module_key": module_key,
-            "signatories": free_signatories,
-            "threshold": threshold
-        }
-    }
-    send_call(current_keypair, call)
+    if agreement_count == threshold:
+        current_keypair = Keypair.create_from_mnemonic(MNEMONIC)
+        fn = "add_to_whitelist"
+        call = {"module_key": module_key}
+        response = await send_call(fn, current_keypair, call)
+        print(f"Response of the function {fn} is {response}")
 
+        for user_id in list(nomination_approvals.keys()):
+            nomination_approvals[user_id] = [
+                approval for approval in nomination_approvals[user_id] if approval[1] != module_key
+            ]
 
 @BOT.slash_command(guild_ids=[GUILD_ID],  # !!! make sure to pass as string
                    description="Removes module from a whitelist.",
                    manage_roles=True)
 async def remove(ctx, module_key: str, reason: str) -> None:
+    "x"
     if ctx.channel.id != NOMINATOR_CHANNEL_ID:
-        await ctx.respond("This command can only be used in the designated channel.", ephemeral=True)
+        await ctx.respond("This command can only be used in the designated channel.",
+                           ephemeral=True)
         return
 
-    member = await ctx.guild.fetch_member(ctx.author.id)
-    role = discord.utils.get(ctx.guild.roles, name="nominator")
-
-    if role not in member.roles:
+    role = discord.utils.get(ctx.guild.roles, name=ROLE_NAME)
+    if role not in ctx.author.roles:
         await ctx.respond("You don't have the required role to use this command.", ephemeral=True)
         return
+
+    signatores_count = len(role.members)
+    threshold = signatores_count // 2 + 1
 
     if not is_ss58_address(module_key):
         await ctx.respond("Invalid module key.", ephemeral=True)
         return
 
-    current_whitelist = whitelist()
-
-    if module_key not in current_whitelist:
-        await ctx.respond(f"Module key {module_key} is not in a whitelist", ephemeral=True)
+    nominated_modules = [approval[1] for approval in removal_approvals.get(ctx.author.id, [])]
+    if module_key in nominated_modules:
+        await ctx.respond(f"You have already asked to remove {module_key}.", ephemeral=True)
         return
 
-    signatores_addys = [keypair.ss58_address for keypair in keypairs]
-    free_signatories = [signatory for signatory in signatores_addys if signatory not in [
-        approval[0] for approval in nomination_approvals.get(ctx.author.id, [])]]
-    current_addy = random.choice(free_signatories)
-    current_keypair = [
-        keypair for keypair in keypairs if keypair.ss58_address == current_addy][0]
 
-    nomination_approvals.setdefault(
-        ctx.author.id, []).append((current_addy, module_key))
-    agreement_count: int = 0
-    for _, approvals in nomination_approvals.items():
-        for _, module in approvals:
-            if module == module_key:
-                agreement_count += 1
+    current_whitelist = await whitelist()
+    if module_key not in current_whitelist:
+        await ctx.respond(f"Module key {module_key} is not whitelisted", ephemeral=True)
+        return
 
-    onchain_message = "Multisig is now removing this module onchain, it will be deleted from the whitelist soon." if agreement_count == threshold else "Still waiting for more votes, before executing onchain."
+    agreement_count = sum(module == module_key for approvals
+                          in removal_approvals.values() for _, module in approvals)
+    onchain_message = (
+        "Multisig is now removing this module onchain, it will soon be removed."
+        if agreement_count == threshold
+        else "Still waiting for more votes, before executing onchain."
+    )
 
-    await ctx.respond(f"Nominator {ctx.author.mention} accepted removal of module `{module_key}` for the reason of `{reason}`. This is the `{agreement_count}` agreement out of `{threshold}` threshold."
-                      f"\n{onchain_message}")
-    call = {
-        "call_module": "SubspaceModule",
-        "call_function": "remove_from_whitelist",
-        "call_args": {
-            "module_key": module_key,
-            "reason": reason,
-            "signatories": free_signatories,
-            "threshold": threshold
-        }
-    }
-    send_call(current_keypair, call)
+    await ctx.respond(
+        f"Nominator {ctx.author.mention} asked to remove module `{module_key}`.\n"
+        f"For the reason of `{reason}`.\n"
+        f"This is the `{agreement_count}` agreement out of `{threshold}` threshold.\n"
+        f"{onchain_message}"
+    )
+
+    if agreement_count == threshold:
+        current_keypair = Keypair.create_from_mnemonic(MNEMONIC)
+        fn = "remove_from_whitelist"
+        call = {"module_key": module_key}
+        response = await send_call(fn, current_keypair, call)
+        print(f"Response of the function {fn} is {response}")
+
+        for user_id in list(nomination_approvals.keys()):
+            nomination_approvals[user_id] = [
+                approval for approval in nomination_approvals[user_id] if approval[1] != module_key
+            ]
 
 
 async def setup_module_request_ui():
+    "x"
     channel = BOT.get_channel(REQUEST_CHANNEL_ID)  # as integer
 
     embed = discord.Embed(
@@ -274,6 +286,7 @@ async def setup_module_request_ui():
 
 
 class ModuleRequestModal(discord.ui.Modal):
+    "x"
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self.add_item(discord.ui.InputText(label="SS58 Address of the Module"))
