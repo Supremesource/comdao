@@ -27,10 +27,9 @@ Arguably, the bot is a single point of failure, where only one person holds all 
 
 Users with the "module_nominator" role in the Discord server have access to the following commands:
 
-- [x] `/nominate <ss58_key>`: Starts a ticket for nominating a module for the whitelist.
+- [x] `/approve <ss58_key>`: Approves ticket for a module.
 - [x] `/remove <ss58_key> <reason>`: Starts a ticket for removing a module from the whitelist.
-- [ ] `/addvoter <discord_tag>`: Creates a new multisig key and sends the user a direct message with an introduction (guideline and commands).
-- [ ] `/kickvoter <discord_tag>`: Deletes the associated multisig key and sends the user a direct message informing them of their removal.
+- [x] `/reject <ss58_key> <reason>`: Rejects a ticket for a module.
 - [x] `/stats`: Lists a table of members and their `multisig_participation_count` and `multisig_abscence_count`, ranked by participation.
 - [x] `/help`: Posts an informational message.
 

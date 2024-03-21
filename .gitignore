@@ -1,4 +1,9 @@
 /.direnv
 /data
-
+/src/tests
 /env/**/*.env
+
+.ipynb_checkpoints
+
+/.tests
+__pycache__

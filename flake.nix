@@ -18,7 +18,6 @@
           ];
           shellHook = ''
             export PATH=$PWD/.venv/bin:$PATH
-            poetry install
           '';
         };
       }
