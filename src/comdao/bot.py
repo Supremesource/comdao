@@ -357,7 +357,8 @@ async def setup_module_request_ui():
 
     embed = discord.Embed(
         title="Submit Module Request",
-        description="Click the button below to submit a module request.",
+        description="Click the button below to submit a module request. \n"
+        "For further information visit: [subnet zero consensus explination](https://github.com/Supremesource/comdao/tree/main)",
         color=discord.Color.green(),
     )
     embed.set_thumbnail(url="https://www.communeai.org/gif/cubes/green_small.gif")
