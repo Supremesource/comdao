@@ -9,6 +9,7 @@ from functools import wraps
 from typing import Any
 
 import discord
+
 # for valid url
 import validators
 from communex.client import CommuneClient
@@ -159,31 +160,14 @@ async def on_application_command_error(
 )
 @commands.cooldown(1, 10, commands.BucketType.user)
 async def help(ctx) -> None:
-    help_message = """
-🚀 **Available Commands:**
+    help_message = """🚀 **Commune DAO Commands:**
+1. `/approve <ss58 key>` - Approves a module for whitelist.
+2. `/remove <ss58 key> <reason>` - Removes a module from the whitelist. 
+3. `/reject <ss58 key> <reason>` - Rejects a module approval.
+4. `/stats` - Lists a table of members and their `multisig_participation_count` and `multisig_abscence_count`, ranked by participation.
+5. `/help` - Displays this help message.
 
-1. `/nominate <ss58 key>`
-   - Starts a ticket for nominating a module for the whitelist.
-   - ✅ Implemented
-
-2. `/remove <ss58 key> <reason>`
-   - Starts a ticket for removing a module from the whitelist.
-   - ✅ Implemented
-
-3. `/reject <ss58 key> <reason>`
-    - Rejects a module nomination.
-    - ✅ Implemented
-   
-4. `/stats`
-   - Lists a table of members and their `multisig_participation_count` and `multisig_abscence_count`, ranked by participation.
-   - ✅ Implemented
-
-4. `/help`
-   - Displays this help message.
-   - ✅ Implemented
-
-📝 **Note:** Replace `<parameter>` with the appropriate value when using the commands.
-"""
+📝 **Note:** Replace `<parameter>` with the appropriate value when using the commands."""
 
     await ctx.respond(help_message, ephemeral=True)
 
@@ -462,9 +446,9 @@ async def setup_module_request_ui():
         "For further information visit: "
         "[Subnet Zero Consensus Explination](https://github.com/Supremesource/comdao/tree/main)\n"
         "For registration docs on other subnets follow: [Docs](https://docs.communex.ai/communex)",
-        color=discord.Color.green(),
+        color=discord.Color(0xFF69B4),
     )
-    embed.set_thumbnail(url="https://www.communeai.org/gif/cubes/green_small.gif")
+    embed.set_thumbnail(url="https://commune-t.pages.dev/gif/cubes/pink_small.gif")
 
     view = ModuleRequestView()
     message = await channel.send(embed=embed, view=view)
@@ -548,7 +532,7 @@ class ModuleRequestModal(discord.ui.Modal):
             )
             return
 
-        embed = discord.Embed(title="Module Request", color=discord.Color.green())
+        embed = discord.Embed(title="Module Request", color=discord.Color(0xFF69B4))
         embed.add_field(
             name="Submitted by", value=interaction.user.mention, inline=False
         )
