@@ -2,6 +2,7 @@ import asyncio
 import datetime
 import os
 from collections import defaultdict
+from functools import wraps
 from typing import Any
 
 import discord
@@ -26,6 +27,7 @@ NOMINATOR_CHANNEL_ID = int(os.environ["DISCORD_NOMINATOR_CHANNEL_ID"])
 
 ROLE_NAME = "nominator"
 NODE_URL = "ws://127.0.0.1:9944"  # "wss://commune.api.onfinality.io/public-ws"
+MODULE_SUBMISSION_DELAY = 3600
 
 INTENTS = discord.Intents.all()
 BOT = commands.Bot(command_prefix="/", intents=INTENTS)
@@ -39,6 +41,8 @@ rejection_approvals: dict[str, list[Ss58Address]] = {}
 last_submission_times = {}
 
 lock = asyncio.Lock()
+
+# == Blockchain Communication ==
 
 
 async def whitelist() -> list[Ss58Address]:
@@ -57,23 +61,71 @@ async def send_call(fn: str, keypair: Keypair, call: dict) -> None:
     return response
 
 
-def has_required_role():
-    async def predicate(ctx):
-        role = discord.utils.get(ctx.guild.roles, name=ROLE_NAME)
-        if role not in ctx.author.roles:
-            await ctx.respond(
-                "You don't have the required role to use this command.", ephemeral=True
-            )
-            return False
-        return True
+# == Decorators ==
 
-    return commands.check(predicate)
+
+def has_required_role():
+    def decorator(func):
+        @wraps(func)
+        async def wrapper(ctx: Any, *args, **kwargs):
+            role = discord.utils.get(ctx.guild.roles, name=ROLE_NAME)
+            if role not in ctx.author.roles:
+                await ctx.respond(
+                    "You do not have the required permissions to use this command.",
+                    ephemeral=True,
+                )
+                return
+            return await func(ctx, *args, **kwargs)
+
+        return wrapper
+
+    return decorator
+
+
+def in_nominator_channel():
+    def decorator(func):
+        @wraps(func)
+        async def wrapper(ctx: Any, *args, **kwargs):
+            if ctx.channel.id != NOMINATOR_CHANNEL_ID:
+                await ctx.respond(
+                    "This command can only be used in the designated channel.",
+                    ephemeral=True,
+                )
+                return
+            return await func(ctx, *args, **kwargs)
+
+        return wrapper
+
+    return decorator
+
+
+# == Discord Bot ==
 
 
 @BOT.event
 async def on_ready() -> None:
     print(f"{BOT.user} is now online!")
     await setup_module_request_ui()
+
+
+@BOT.event
+async def on_application_command_error(
+    ctx: discord.ApplicationContext, error: discord.ApplicationCommandError
+):
+    if isinstance(error, commands.CommandOnCooldown):
+        retry_after = round(error.retry_after, 2)
+        await ctx.respond(
+            f"You are on cooldown. Please try again in {retry_after} seconds.",
+            ephemeral=True,
+        )
+    elif isinstance(error, commands.CheckFailure):
+        await ctx.respond(
+            "You do not have the required permissions to use this command.",
+            ephemeral=True,
+        )
+    else:
+        # Raise other types of errors
+        raise error
 
 
 @BOT.slash_command(
@@ -113,12 +165,11 @@ async def help(ctx) -> None:
     guild_ids=[GUILD_ID],  # ! make sure to pass as string
     description="Lists member stats based on multisig participation.",
 )
+@commands.cooldown(1, 10, commands.BucketType.user)
 async def stats(ctx: Any) -> None:
     role = discord.utils.get(ctx.guild.roles, name=ROLE_NAME)
-
     members = role.members
     stats_data = []
-
     for member in members:
         multisig_participation_count = sum(
             member.id == user_id for user_id in nomination_approvals.keys()
@@ -128,7 +179,6 @@ async def stats(ctx: Any) -> None:
             + len(removal_approvals)
             - multisig_participation_count
         )
-
         stats_data.append(
             (member, multisig_participation_count, multisig_absence_count)
         )
@@ -143,7 +193,6 @@ async def stats(ctx: Any) -> None:
         for member, participation_count, absence_count in stats_data
     ]
     table = tabulate(table_data, headers, tablefmt="grid")
-
     await ctx.respond(f"```\n{table}\n```", ephemeral=True)
 
 
@@ -153,13 +202,9 @@ async def stats(ctx: Any) -> None:
     manage_roles=True,
 )
 @has_required_role()
-@commands.cooldown(1, 60, commands.BucketType.user)
+@commands.cooldown(1, 120, commands.BucketType.user)
+@in_nominator_channel()
 async def approve(ctx: Any, module_key: str) -> None:
-    if ctx.channel.id != NOMINATOR_CHANNEL_ID:
-        await ctx.respond(
-            "This command can only be used in the designated channel.", ephemeral=True
-        )
-        return
 
     signatores_count = len(discord.utils.get(ctx.guild.roles, name=ROLE_NAME).members)
     threshold = signatores_count // 2 + 1
@@ -244,12 +289,8 @@ async def approve(ctx: Any, module_key: str) -> None:
 )
 @has_required_role()
 @commands.cooldown(1, 60, commands.BucketType.user)
+@in_nominator_channel()
 async def reject(ctx: Any, module_key: str, reason: str) -> None:
-    if ctx.channel.id != NOMINATOR_CHANNEL_ID:
-        await ctx.respond(
-            "This command can only be used in the designated channel.", ephemeral=True
-        )
-        return
 
     # make sure that author hasn't rejected the module before
     rejected_modules = [
@@ -277,13 +318,9 @@ async def reject(ctx: Any, module_key: str, reason: str) -> None:
     manage_roles=True,
 )
 @has_required_role()
-@commands.cooldown(1, 60, commands.BucketType.user)
+@commands.cooldown(1, 120, commands.BucketType.user)
+@in_nominator_channel()
 async def remove(ctx: Any, module_key: str, reason: str) -> None:
-    if ctx.channel.id != NOMINATOR_CHANNEL_ID:
-        await ctx.respond(
-            "This command can only be used in the designated channel.", ephemeral=True
-        )
-        return
 
     signatores_count = len(discord.utils.get(ctx.guild.roles, name=ROLE_NAME).members)
     threshold = signatores_count // 2 + 1
@@ -356,9 +393,10 @@ async def setup_module_request_ui():
     channel = BOT.get_channel(REQUEST_CHANNEL_ID)  # as integer
 
     embed = discord.Embed(
-        title="Submit Module Request",
+        title="Submit Module Request To Subnet Zero",
         description="Click the button below to submit a module request. \n"
-        "For further information visit: [subnet zero consensus explination](https://github.com/Supremesource/comdao/tree/main)",
+        "For further information visit: [Subnet Zero Consensus Explination](https://github.com/Supremesource/comdao/tree/main)\n"
+        "For registration docs on other subnets follow: [Docs](https://docs.communex.ai/communex)",
         color=discord.Color.green(),
     )
     embed.set_thumbnail(url="https://www.communeai.org/gif/cubes/green_small.gif")
@@ -370,6 +408,9 @@ async def setup_module_request_ui():
     while True:
         await asyncio.sleep(90)
         await message.edit(embed=embed, view=view)
+
+
+# == Module Request UI ==
 
 
 class ModuleRequestModal(discord.ui.Modal):
@@ -402,9 +443,12 @@ class ModuleRequestModal(discord.ui.Modal):
             last_submission_time = last_submission_times[user_id]
             time_since_last_submission = current_time - last_submission_time
 
-            if time_since_last_submission < datetime.timedelta(minutes=3600):
+            if time_since_last_submission < datetime.timedelta(
+                minutes=MODULE_SUBMISSION_DELAY
+            ):
                 remaining_time = (
-                    datetime.timedelta(minutes=3600) - time_since_last_submission
+                    datetime.timedelta(minutes=MODULE_SUBMISSION_DELAY)
+                    - time_since_last_submission
                 )
                 await interaction.response.send_message(
                     f"You can submit another module request in {remaining_time.seconds} seconds.",
