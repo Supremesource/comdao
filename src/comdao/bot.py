@@ -1,12 +1,14 @@
 import asyncio
 import datetime
+import html
+import logging
 import os
+import re
 from collections import defaultdict
 from functools import wraps
 from typing import Any
 
 import discord
-
 # for valid url
 import validators
 from communex.client import CommuneClient
@@ -14,16 +16,19 @@ from communex.compat.key import classic_load_key
 from communex.key import is_ss58_address
 from communex.types import NetworkParams, Ss58Address
 from discord.ext import commands
+from dotenv import load_dotenv
 from substrateinterface import Keypair
 from substrateinterface.base import ExtrinsicReceipt
 from tabulate import tabulate
 
 # constants
-MNEMONIC = os.environ["MNEMONIC"]
-BOT_TOKEN = os.environ["DISCORD_BOT_TOKEN"]
-GUILD_ID = str(os.environ["DISCORD_GUILD_ID"])
-REQUEST_CHANNEL_ID = int(os.environ["DISCORD_REQUEST_CHANNEL_ID"])
-NOMINATOR_CHANNEL_ID = int(os.environ["DISCORD_NOMINATOR_CHANNEL_ID"])
+load_dotenv()
+
+MNEMONIC = os.getenv("MNEMONIC")
+BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN")
+GUILD_ID = os.getenv("DISCORD_GUILD_ID")
+REQUEST_CHANNEL_ID = int(os.getenv("DISCORD_REQUEST_CHANNEL_ID", 0))
+NOMINATOR_CHANNEL_ID = int(os.getenv("DISCORD_NOMINATOR_CHANNEL_ID", 0))
 
 ROLE_NAME = "nominator"
 NODE_URL = "ws://127.0.0.1:9944"  # "wss://commune.api.onfinality.io/public-ws"
@@ -41,6 +46,10 @@ rejection_approvals: dict[str, list[Ss58Address]] = {}
 last_submission_times = {}
 
 lock = asyncio.Lock()
+
+# Set up logging
+logging.basicConfig(level=logging.ERROR)
+logger = logging.getLogger("discord_bot")
 
 # == Blockchain Communication ==
 
@@ -123,14 +132,32 @@ async def on_application_command_error(
             "You do not have the required permissions to use this command.",
             ephemeral=True,
         )
+    elif isinstance(error, discord.HTTPException):
+        logger.error(f"HTTP Exception: {error}")
+        await ctx.respond(
+            "An error occurred while processing your request. Please try again later.",
+            ephemeral=True,
+        )
+    elif isinstance(error, discord.Forbidden):
+        logger.error(f"Forbidden: {error}")
+        await ctx.respond(
+            "The bot does not have the necessary permissions to perform this action.",
+            ephemeral=True,
+        )
     else:
-        # Raise other types of errors
+        logger.error(f"Unhandled exception: {error}")
+        await ctx.respond(
+            "An unexpected error occurred. Please contact the bot administrator.",
+            ephemeral=True,
+        )
+        # Raise the error for further investigation
         raise error
 
 
 @BOT.slash_command(
     guild_ids=[GUILD_ID], description="Help command"  # ! make sure to pass as string
 )
+@commands.cooldown(1, 10, commands.BucketType.user)
 async def help(ctx) -> None:
     help_message = """
 🚀 **Available Commands:**
@@ -202,9 +229,17 @@ async def stats(ctx: Any) -> None:
     manage_roles=True,
 )
 @has_required_role()
-@commands.cooldown(1, 120, commands.BucketType.user)
+@commands.cooldown(1, 60, commands.BucketType.user)
 @in_nominator_channel()
 async def approve(ctx: Any, module_key: str) -> None:
+    # Validate and sanitize the module_key input
+    module_key = html.escape(module_key.strip())
+    if not re.match(r"^[a-zA-Z0-9]+$", module_key):
+        await ctx.respond(
+            "Invalid module key. Only alphanumeric characters are allowed.",
+            ephemeral=True,
+        )
+        return
 
     signatores_count = len(discord.utils.get(ctx.guild.roles, name=ROLE_NAME).members)
     threshold = signatores_count // 2 + 1
@@ -217,7 +252,7 @@ async def approve(ctx: Any, module_key: str) -> None:
         approval[1] for approval in nomination_approvals.get(ctx.author.id, [])
     ]
     if module_key in nominated_modules:
-        await ctx.respond(f"You have already nominated `{module_key}.`", ephemeral=True)
+        await ctx.respond(f"You have already nominated `{module_key}`.", ephemeral=True)
         return
 
     if module_key not in request_ids:
@@ -291,8 +326,24 @@ async def approve(ctx: Any, module_key: str) -> None:
 @commands.cooldown(1, 60, commands.BucketType.user)
 @in_nominator_channel()
 async def reject(ctx: Any, module_key: str, reason: str) -> None:
+    # Validate and sanitize the module_key input
+    module_key = html.escape(module_key.strip())
+    if not re.match(r"^[a-zA-Z0-9]+$", module_key):
+        await ctx.respond(
+            "Invalid module key. Only alphanumeric characters are allowed.",
+            ephemeral=True,
+        )
+        return
 
-    # make sure that author hasn't rejected the module before
+    # Validate and sanitize the reason input
+    reason = html.escape(reason.strip())
+    if not reason:
+        await ctx.respond(
+            "Please provide a valid reason for rejection.", ephemeral=True
+        )
+        return
+
+    # Make sure that the author hasn't rejected the module before
     rejected_modules = [
         approval[1] for approval in rejection_approvals.get(ctx.author.id, [])
     ]
@@ -308,7 +359,7 @@ async def reject(ctx: Any, module_key: str, reason: str) -> None:
         ) + [(ctx.author.id, module_key)]
 
     await ctx.respond(
-        f"{ctx.author.mention} is rejecting the module `{module_key}` for the reason of `{reason}`."
+        f"{ctx.author.mention} is rejecting the module `{module_key}` for the reason: `{reason}`."
     )
 
 
@@ -318,9 +369,23 @@ async def reject(ctx: Any, module_key: str, reason: str) -> None:
     manage_roles=True,
 )
 @has_required_role()
-@commands.cooldown(1, 120, commands.BucketType.user)
+@commands.cooldown(1, 60, commands.BucketType.user)
 @in_nominator_channel()
 async def remove(ctx: Any, module_key: str, reason: str) -> None:
+    # Validate and sanitize the module_key input
+    module_key = html.escape(module_key.strip())
+    if not re.match(r"^[a-zA-Z0-9]+$", module_key):
+        await ctx.respond(
+            "Invalid module key. Only alphanumeric characters are allowed.",
+            ephemeral=True,
+        )
+        return
+
+    # Validate and sanitize the reason input
+    reason = html.escape(reason.strip())
+    if not reason:
+        await ctx.respond("Please provide a valid reason for removal.", ephemeral=True)
+        return
 
     signatores_count = len(discord.utils.get(ctx.guild.roles, name=ROLE_NAME).members)
     threshold = signatores_count // 2 + 1
@@ -332,7 +397,6 @@ async def remove(ctx: Any, module_key: str, reason: str) -> None:
     nominated_modules = [
         approval[1] for approval in removal_approvals.get(ctx.author.id, [])
     ]
-
     if module_key in nominated_modules:
         await ctx.respond(
             f"You have already asked to remove `{module_key}`.", ephemeral=True
@@ -368,7 +432,7 @@ async def remove(ctx: Any, module_key: str, reason: str) -> None:
 
     await ctx.respond(
         f"Nominator {ctx.author.mention} asked to remove module `{module_key}`.\n"
-        f"For the reason of `{reason}`.\n"
+        f"For the reason: `{reason}`.\n"
         f"This is the `{agreement_count}` agreement out of `{threshold}` threshold.\n"
         f"{onchain_message}"
     )
@@ -395,7 +459,8 @@ async def setup_module_request_ui():
     embed = discord.Embed(
         title="Submit Module Request To Subnet Zero",
         description="Click the button below to submit a module request. \n"
-        "For further information visit: [Subnet Zero Consensus Explination](https://github.com/Supremesource/comdao/tree/main)\n"
+        "For further information visit: "
+        "[Subnet Zero Consensus Explination](https://github.com/Supremesource/comdao/tree/main)\n"
         "For registration docs on other subnets follow: [Docs](https://docs.communex.ai/communex)",
         color=discord.Color.green(),
     )
@@ -435,7 +500,6 @@ class ModuleRequestModal(discord.ui.Modal):
         )
 
     async def callback(self, interaction: discord.Interaction):
-
         user_id = interaction.user.id
         current_time = datetime.datetime.now()
 
@@ -456,45 +520,48 @@ class ModuleRequestModal(discord.ui.Modal):
                 )
                 return
 
-        embed = discord.Embed(title="Module Request", color=discord.Color.green())
-        embed.add_field(
-            name="Submitted by", value=interaction.user.mention, inline=False
-        )
-        embed.add_field(name="SS58 Address", value=self.children[0].value, inline=False)
-        embed.add_field(
-            name="Module Description", value=self.children[1].value, inline=False
-        )
-        embed.add_field(
-            name="Endpoint Information", value=self.children[2].value, inline=False
-        )
-        embed.add_field(name="Team Members", value=self.children[3].value, inline=False)
-        embed.add_field(
-            name="Repository Link", value=self.children[4].value, inline=False
-        )
+        # Validate and sanitize user inputs
+        ss58_address = html.escape(self.children[0].value.strip())
+        module_description = html.escape(self.children[1].value.strip())
+        endpoint_info = html.escape(self.children[2].value.strip())
+        team_members = html.escape(self.children[3].value.strip())
+        repository_link = html.escape(self.children[4].value.strip())
 
-        # check if the ss58 address is valid
-        if not is_ss58_address(self.children[0].value):
+        # Validate SS58 address format
+        if not is_ss58_address(ss58_address):
             await interaction.response.send_message(
                 "Invalid SS58 Address", ephemeral=True
             )
             return
 
-        # check if repository link is valid
-        if not validators.url(self.children[4].value):
+        # Validate repository link
+        if not validators.url(repository_link):
             await interaction.response.send_message(
                 "Invalid Repository Link", ephemeral=True
             )
             return
 
-        # check if the ss58 address is already submitted
-        if self.children[0].value in request_ids:
+        # Check if the SS58 address is already submitted
+        if ss58_address in request_ids:
             await interaction.response.send_message(
                 "Module request already submitted", ephemeral=True
             )
             return
 
-        # key considered as the request id
-        request_ids.append(self.children[0].value)
+        embed = discord.Embed(title="Module Request", color=discord.Color.green())
+        embed.add_field(
+            name="Submitted by", value=interaction.user.mention, inline=False
+        )
+        embed.add_field(name="SS58 Address", value=ss58_address, inline=False)
+        embed.add_field(
+            name="Module Description", value=module_description, inline=False
+        )
+        embed.add_field(name="Endpoint Information", value=endpoint_info, inline=False)
+        embed.add_field(name="Team Members", value=team_members, inline=False)
+        embed.add_field(name="Repository Link", value=repository_link, inline=False)
+
+        # Key considered as the request ID
+        request_ids.append(ss58_address)
 
         # Update the last submission time for the user
         last_submission_times[user_id] = current_time
