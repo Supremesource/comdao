@@ -1,4 +1,4 @@
-# Commune Nominator DAO
+# Module Curation Dao
 
 This bot is designed to manage the nomination and removal of modules from a whitelist using a multisignature address stored as a global parameter. The bot interacts with users through Discord commands. For better understanding please refer to the following issue [initial-issue](https://github.com/agicommies/subspace-network/issues/40)
 
