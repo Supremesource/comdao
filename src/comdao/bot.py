@@ -32,7 +32,7 @@ REQUEST_CHANNEL_ID = int(os.getenv("DISCORD_REQUEST_CHANNEL_ID", 0))
 NOMINATOR_CHANNEL_ID = int(os.getenv("DISCORD_NOMINATOR_CHANNEL_ID", 0))
 
 ROLE_NAME = "nominator"
-NODE_URL = "ws://127.0.0.1:9944"  # "wss://commune.api.onfinality.io/public-ws"
+NODE_URL = "wss://testnet-commune-api-node-0.communeai.net"  # "wss://commune.api.onfinality.io/public-ws"
 MODULE_SUBMISSION_DELAY = 3600
 
 INTENTS = discord.Intents.all()
@@ -45,6 +45,8 @@ nomination_approvals: dict[str, list[Ss58Address]] = {}
 removal_approvals: dict[str, list[Ss58Address]] = {}
 rejection_approvals: dict[str, list[Ss58Address]] = {}
 last_submission_times = {}
+# constants
+CURRENT_WHITELIST: list[Ss58Address] = []
 
 lock = asyncio.Lock()
 
@@ -52,14 +54,18 @@ lock = asyncio.Lock()
 logging.basicConfig(level=logging.ERROR)
 logger = logging.getLogger("discord_bot")
 
+
 # == Blockchain Communication ==
-
-
-async def whitelist() -> list[Ss58Address]:
+def whitelist() -> list[Ss58Address]:
     client = CommuneClient(NODE_URL)
     # Get the whitelist from the blockchain
-    # TODO: Implement this
-    legit_whitelist = client.query("LegitWhitelist", params=[])
+    legit_whitelist = list(
+        (
+            client.query_map("LegitWhitelist", params=[], extract_value=False)[
+                "LegitWhitelist"
+            ]
+        ).keys()
+    )
     return legit_whitelist
 
 
@@ -72,8 +78,6 @@ async def send_call(fn: str, keypair: Keypair, call: dict) -> None:
 
 
 # == Decorators ==
-
-
 def has_required_role():
     def decorator(func):
         @wraps(func)
@@ -110,8 +114,6 @@ def in_nominator_channel():
 
 
 # == Discord Bot ==
-
-
 @BOT.event
 async def on_ready() -> None:
     print(f"{BOT.user} is now online!")
@@ -182,12 +184,15 @@ async def stats(ctx: Any) -> None:
     members = role.members
     stats_data = []
     for member in members:
-        multisig_participation_count = sum(
-            member.id == user_id for user_id in nomination_approvals.keys()
-        ) + sum(member.id == user_id for user_id in removal_approvals.keys())
+        multisig_participation_count = (
+            sum(member.id == user_id for user_id in nomination_approvals.keys())
+            + sum(member.id == user_id for user_id in removal_approvals.keys())
+            + sum(member.id == user_id for user_id in rejection_approvals.keys())
+        )
         multisig_absence_count = (
             len(nomination_approvals)
             + len(removal_approvals)
+            + len(rejection_approvals)
             - multisig_participation_count
         )
         stats_data.append(
@@ -246,13 +251,6 @@ async def approve(ctx: Any, module_key: str) -> None:
         )
         return
 
-    current_whitelist = await whitelist()
-    if module_key in current_whitelist:
-        await ctx.respond(
-            f"Module key `{module_key}` is already whitelisted", ephemeral=True
-        )
-        return
-
     # make sure the author hasn't rejected the module before
     rejected_modules = [
         approval[1] for approval in rejection_approvals.get(ctx.author.id, [])
@@ -287,6 +285,8 @@ async def approve(ctx: Any, module_key: str) -> None:
 
     if agreement_count == threshold:
         current_keypair = Keypair.create_from_mnemonic(MNEMONIC)
+        # update the whitelist
+        CURRENT_WHITELIST.append(module_key)
         fn = "add_to_whitelist"
         call = {"module_key": module_key}
         await send_call(fn, current_keypair, call)
@@ -387,8 +387,7 @@ async def remove(ctx: Any, module_key: str, reason: str) -> None:
         )
         return
 
-    current_whitelist = await whitelist()
-    if module_key not in current_whitelist:
+    if module_key not in CURRENT_WHITELIST:
         await ctx.respond(
             f"Module key `{module_key}` is not whitelisted", ephemeral=True
         )
@@ -460,8 +459,6 @@ async def setup_module_request_ui():
 
 
 # == Module Request UI ==
-
-
 class ModuleRequestModal(discord.ui.Modal):
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
@@ -518,6 +515,12 @@ class ModuleRequestModal(discord.ui.Modal):
             )
             return
 
+        if ss58_address in CURRENT_WHITELIST:
+            await interaction.response.send_message(
+                "Module already whitelisted", ephemeral=True
+            )
+            return
+
         # Validate repository link
         if not validators.url(repository_link):
             await interaction.response.send_message(
@@ -571,6 +574,10 @@ class ModuleRequestView(discord.ui.View):
 
 
 def main() -> None:
+    # get the whitelist, so we don't have to query many times
+    global CURRENT_WHITELIST
+    white = whitelist()
+    CURRENT_WHITELIST = white
     BOT.run(BOT_TOKEN)
 
 
