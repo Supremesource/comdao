@@ -1,6 +1,7 @@
 from typing import Iterable, Sized, TypeVar, Protocol, Iterator
 import statistics
 import html
+import json
 
 import discord
 from communex.types import Ss58Address
@@ -10,8 +11,11 @@ from typeguard import check_type
 
 from ..db.cache import Cache, NominationVote, CACHE, save_state
 from ..config.settings import MNEMONIC, ROLE_NAME
-from ..helpers.substrate_interface import send_call
+from ..config.application import Application
+from .substrate_interface import send_call
 from .substrate_interface import get_applications
+
+from .ipfs import get_json_from_cid
 
 
 
@@ -25,25 +29,40 @@ class SizedIterable(Protocol[T]):
 
 
 
-def get_pending_applications() -> list[dict[str, str]]:
-    update_cache = False
+def get_new_pending_applications(cache: Cache) -> list[Application]:
     applications = get_applications()
-    pending: list[dict[str, str]] = []
+    pending: list[Application] = []
     for app in applications.values():
-        app_id = app["id"]
-        app_status = app["status"]
-        if app_status.lower() == "pending":
-            if app_id not in CACHE.dao_applications:
-                CACHE.dao_applications.append(app_id)
-                update_cache = True
-            pending.append(app)
-    if update_cache:
-        CACHE.save_to_disk()
+        try:
+            app_id = app["id"]
+            app_status = app["status"]
+            proposal_dict = get_json_from_cid(app["data"])
+            if not proposal_dict:
+                continue
+
+            ss58_key = app["user_id"]
+            assert is_ss58_address(ss58_key)
+            application_obj = Application(
+                discord_id=proposal_dict["discord_id"],
+                title=proposal_dict["title"],
+                body=json.dumps(proposal_dict["body"]),
+                app_id=app_id, # type: ignore,
+                app_key=ss58_key
+            )
+            if app_status.lower() == "pending":
+                if app_id not in cache.dao_applications:
+                    cache.dao_applications.append(app_id)
+                    cache.request_ids.append(ss58_key)
+                    pending.append(application_obj)
+        except Exception as e:
+            print(e)
+            continue
     return pending
 
 
 def get_votes_threshold(ctx: discord.ApplicationContext):
     guild = ctx.guild
+    #guild = discord.Client().get_guild(919913039682220062)
     guild = check_type(guild, discord.Guild)
     nominators = discord.utils.get(guild.roles, name=ROLE_NAME)
     nominators = check_type(nominators, discord.Role)
@@ -244,5 +263,8 @@ async def pop_from_whitelist(cache: Cache, module_key: Ss58Address):
         cache.current_whitelist.remove(module_key)
 
 if __name__ == "__main__":
-   applications = get_pending_applications()
-   breakpoint()
+#    applications = get_applications()
+#    print(applications)
+#    breakpoint()
+    ths = get_votes_threshold("afsds")
+    print(ths)

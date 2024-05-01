@@ -46,7 +46,7 @@ def add_dao_application():
     key2 = classic_load_key("dev02")
     params = {
         "application_key": key2.ss58_address, 
-        "data": json.dumps({"testing": "json"})
+        "data": "QmR8X62PpEMtEik3cYq6VQ2Ug7YRZCqEqTXeHEVXp6zyem"
     }
     fn = "add_dao_application"
     query_result = client.compose_call(fn, params=params, key=key)
@@ -64,4 +64,4 @@ def refuse_dao_application():
 
 
 if __name__ == "__main__":
-    get_applications()
+    add_dao_application()

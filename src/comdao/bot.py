@@ -1,15 +1,10 @@
 import asyncio
-import datetime
 import html
-import logging
-import os
-import re
-from collections import defaultdict
 from functools import wraps
-from typing import Any, cast
+from typing import Any
 
 import discord
-
+from discord.ext import tasks
 # for valid url
 from typeguard import check_type
 from communex.client import CommuneClient
@@ -19,17 +14,13 @@ from communex.types import NetworkParams, Ss58Address
 from discord.ext import commands
 from substrateinterface import Keypair
 from substrateinterface.base import ExtrinsicReceipt
-from tabulate import tabulate
 
 from .config.settings import (
     ROLE_NAME,
-    NODE_URL,
-    MODULE_SUBMISSION_DELAY,
-    INTENTS,
     BOT,
     DISCORD_PARAMS,
-    MNEMONIC
 )
+from .config.application import Application
 from .helpers.substrate_interface import whitelist, send_call
 from .helpers.errors import on_application_command_error
 from .helpers.domain_logic import (
@@ -42,11 +33,10 @@ from .helpers.domain_logic import (
     valid_for_removal,
     add_removal_vote,
     pop_from_whitelist,
+    get_new_pending_applications,
     get_votes_threshold,
-    get_pending_applications,
 )
-from .helpers.ui import ModuleRequestView
-from .db.cache import CACHE
+from .db.cache import CACHE, save_state
 
 BOT_TOKEN = DISCORD_PARAMS.BOT_TOKEN
 GUILD_ID = DISCORD_PARAMS.GUILD_ID
@@ -81,34 +71,44 @@ def in_nominator_channel():
 @BOT.event
 async def on_ready() -> None:
     print(f"{BOT.user} is now online!")
-    await show_pending_applications()
-    exit(0)
+    show_pending_applications.start()
 
 
+def to_markdown(app_obj: Application):
+   
+    applicant = app_obj.discord_id
+    data = app_obj.body
+    key = app_obj.app_key
+    guild = BOT.get_guild(GUILD_ID)
+    assert guild
+    member = guild.get_member(applicant)
+    applicant = member if member else str(applicant) + " (ID)"
+    single_mark = (
+        f"Application key: **{key}**\n"
+        f"Applicant: User **{applicant}**\n"
+        f"Data: **{data}**\n"
+    )
+    return single_mark
+
+
+@tasks.loop(seconds=600)
 async def show_pending_applications():
-    channel = await BOT.fetch_channel(REQUEST_CHANNEL_ID)  # as integer
-    channel = check_type(channel, discord.channel.TextChannel)
-    applications = get_pending_applications()
-    embed = discord.Embed(title="New pending applications", color=discord.Color.nitro_pink())
-    #headers = ["Application ID", "Applicant", "Data", "Cost"]
-    #table_data: list[tuple[str, str, str, str]] = []
-    for app_dict in applications:
-        #row_data = (app_dict["id"], app_dict["user_id"], app_dict["data"], app_dict["application_cost"])
-        application_id = app_dict["id"]
-        applicant = app_dict["user_id"]
-        data = app_dict["data"]
-        cost = app_dict["application_cost"]
-        
-        embed.add_field(name=f"Application ID: {application_id}", value=f"Applicant: {applicant}", inline=False)
-        embed.add_field(name="Data", value=data, inline=True)
-        embed.add_field(name="Cost", value=cost, inline=True)
-        embed.add_field(name="\u200b", value="\u200b", inline=False)  # Empty field for spacing
-        embed.add_field(name="\u200b", value="[0x818589]------------------------[/0x818589]", inline=False)  # Horizontal line
-        #table_data.append(row_data)
-    #table = tabulate(table_data, headers, tablefmt="grid")
-    #await channel.send(f"```\n{table}\n```")
-    await channel.send(embed=embed)
-
+    try:
+        channel = await BOT.fetch_channel(REQUEST_CHANNEL_ID)  # as integer
+        channel = check_type(channel, discord.channel.TextChannel)
+        applications = get_new_pending_applications(CACHE)
+        # circunvents discord limitation of 25 fields per embed
+        if not applications:
+            return
+        chunked = [applications[i:i + 25] for i in range(0, len(applications), 25)]
+        for chunk in chunked:
+            embed = discord.Embed(title="New pending applications", color=discord.Color.nitro_pink())
+            for app_obj in chunk:
+                mark = to_markdown(app_obj)
+                embed.add_field(name="Application", value=mark, inline=False)
+            await channel.send(embed=embed)
+    finally:
+        CACHE.save_to_disk()
 
 @BOT.slash_command(
     guild_ids=[GUILD_ID], description="Help command"  # ! make sure to pass as string
@@ -173,49 +173,46 @@ async def approve(
     module_key: str,
     recommended_weight: int
     ) -> None:
-    try:
-        # Validate and sanitize the module_key input
-        module_key = html.escape(module_key.strip())
-        if not is_ss58_address(module_key):
-            await ctx.respond("Invalid module key.", ephemeral=True)
-            return
-        if recommended_weight <= 0 or recommended_weight > 100:
-            await ctx.respond(
-                "Invalid recommended weight. It should be a value between 1 and 100.", 
-                ephemeral=True
-                )
-            return
-
-        user_id = str(ctx.author.id)
-        guild = ctx.guild
-        guild = check_type(guild, discord.Guild)
-        role = discord.utils.get(guild.roles, name=ROLE_NAME)
-        role = check_type(role, discord.Role)
-        signatores_count = len(role.members)
-        #threshold = signatores_count // 2 + 1
-        threshold = 1
-
-
-        valid = await valid_for_approval(module_key, CACHE, ctx)
-        if not valid:
-            return
-        
-        agreement_count = add_approval_vote(CACHE, user_id, module_key, recommended_weight)
-
-        onchain_message = (
-            "Multisig is now adding this module onchain, it will soon start getting votes."
-            if agreement_count == threshold
-            else "Still waiting for more votes, before executing onchain."
-        )
-
+    # Validate and sanitize the module_key input
+    module_key = html.escape(module_key.strip())
+    if not is_ss58_address(module_key):
+        await ctx.respond("Invalid module key.", ephemeral=True)
+        return
+    if recommended_weight <= 0 or recommended_weight > 100:
         await ctx.respond(
-            f"Nominator {ctx.author.mention} accepted module `{module_key}`.\n"
-            f"This is the `{agreement_count}` agreement out of `{threshold}` threshold.\n"
-            f"{onchain_message}"
-        )
-        if agreement_count >= threshold:
-            await push_to_white_list(CACHE, module_key)
-    finally:
+            "Invalid recommended weight. It should be a value between 1 and 100.", 
+            ephemeral=True
+            )
+        return
+
+    user_id = str(ctx.author.id)
+    guild = ctx.guild
+    guild = check_type(guild, discord.Guild)
+    role = discord.utils.get(guild.roles, name=ROLE_NAME)
+    role = check_type(role, discord.Role)
+    threshold = get_votes_threshold(ctx)
+    #threshold = 1
+
+    valid = await valid_for_approval(module_key, CACHE, ctx)
+    if not valid:
+        return
+    
+    agreement_count = add_approval_vote(CACHE, user_id, module_key, recommended_weight)
+
+    onchain_message = (
+        "Multisig is now adding this module onchain, it will soon start getting votes."
+        if agreement_count == threshold
+        else "Still waiting for more votes, before executing onchain."
+    )
+
+    await ctx.respond(
+        f"Nominator {ctx.author.mention} accepted module `{module_key}`.\n"
+        f"This is the `{agreement_count}` agreement out of `{threshold}` threshold.\n"
+        f"{onchain_message}"
+    )
+    if agreement_count >= threshold:
+        await push_to_white_list(CACHE, module_key)
+
         print(CACHE.request_ids)
         CACHE.save_to_disk()
 
@@ -230,20 +227,18 @@ async def approve(
 @in_nominator_channel()
 async def reject(ctx: discord.ApplicationContext, module_key: str, reason: str) -> None:
     # Validate and sanitize the module_key input
-    try:
-        valid = await valid_for_rejection(ctx, CACHE, module_key, reason)
-        if not valid:
-            return
+    valid = await valid_for_rejection(ctx, CACHE, module_key, reason)
+    if not valid:
+        return
 
-        # Acquire the lock before modifying rejection_approvals
-        user_id = str(ctx.author.id)
-        module_key = check_type(module_key, Ss58Address)
-        add_rejection_vote(CACHE, user_id, module_key)
-        await ctx.respond(
-            f"{ctx.author.mention} is rejecting the module `{module_key}` for the reason: `{reason}`."
-        )
-    finally:
-        CACHE.save_to_disk()
+    # Acquire the lock before modifying rejection_approvals
+    user_id = str(ctx.author.id)
+    module_key = check_type(module_key, Ss58Address)
+    add_rejection_vote(CACHE, user_id, module_key)
+    await ctx.respond(
+        f"{ctx.author.mention} is rejecting the module `{module_key}` for the reason: `{reason}`."
+    )
+    CACHE.save_to_disk()
 
 @BOT.slash_command(
     guild_ids=[GUILD_ID],  # ! make sure to pass as string
@@ -255,61 +250,39 @@ async def reject(ctx: discord.ApplicationContext, module_key: str, reason: str) 
 @commands.cooldown(1, 60, commands.BucketType.user)
 @in_nominator_channel()
 async def remove(ctx: discord.ApplicationContext, module_key: str, reason: str) -> None:
-    try:
-        # Validate and sanitize the module_key input
-        module_key = html.escape(module_key.strip())
-        reason = html.escape(reason.strip())
-        user_id = str(ctx.author.id)
-        
-        # threshold = get_votes_threshold(ctx)
-        threshold = 1
 
-        valid = await valid_for_removal(ctx, CACHE, module_key, user_id, reason)
-        if not valid:
-            return
-        
-        module_key = check_type(module_key, Ss58Address)
-        agreement_count = add_removal_vote(CACHE, user_id, module_key)
+    # Validate and sanitize the module_key input
+    module_key = html.escape(module_key.strip())
+    reason = html.escape(reason.strip())
+    user_id = str(ctx.author.id)
+    
+    threshold = get_votes_threshold(ctx)
+    #threshold = 1
 
-        onchain_message = (
-            "Multisig is now removing this module onchain, it will soon be removed."
-            if agreement_count >= threshold
-            else "Still waiting for more votes, before executing onchain."
-        )
+    valid = await valid_for_removal(ctx, CACHE, module_key, user_id, reason)
+    if not valid:
+        return
+    
+    module_key = check_type(module_key, Ss58Address)
+    agreement_count = add_removal_vote(CACHE, user_id, module_key)
 
-        await ctx.respond(
-            f"Nominator {ctx.author.mention} asked to remove module `{module_key}`.\n"
-            f"For the reason: `{reason}`.\n"
-            f"This is the `{agreement_count}` agreement out of `{threshold}` threshold.\n"
-            f"{onchain_message}"
-        )
-
-        if agreement_count >= threshold:
-            await pop_from_whitelist(CACHE, module_key)
-    finally:
-        CACHE.save_to_disk()
-
-
-async def setup_module_request_ui():
-    channel = await BOT.fetch_channel(REQUEST_CHANNEL_ID)  # as integer
-    channel = check_type(channel, discord.channel.TextChannel)
-    embed = discord.Embed(
-        title="Submit Module Request To Subnet Zero",
-        description="Click the button below to submit a module request. \n"
-        "For further information visit: "
-        "[Subnet Zero Consensus Explination](https://github.com/Supremesource/comdao/tree/main)\n"
-        "For registration docs on other subnets follow: [Docs](https://docs.communex.ai/communex)",
-        color=discord.Color(0xFF69B4),
+    onchain_message = (
+        "Multisig is now removing this module onchain, it will soon be removed."
+        if agreement_count >= threshold
+        else "Still waiting for more votes, before executing onchain."
     )
-    embed.set_thumbnail(url="https://commune-t.pages.dev/gif/cubes/pink_small.gif")
 
-    view = ModuleRequestView()
-    message = await channel.send(embed=embed, view=view)
+    await ctx.respond(
+        f"Nominator {ctx.author.mention} asked to remove module `{module_key}`.\n"
+        f"For the reason: `{reason}`.\n"
+        f"This is the `{agreement_count}` agreement out of `{threshold}` threshold.\n"
+        f"{onchain_message}"
+    )
 
-    # Keep the connection alive by sending message every 90 seconds
-    while True:
-        await asyncio.sleep(90)
-        await message.edit(embed=embed, view=view)
+    if agreement_count >= threshold:
+        await pop_from_whitelist(CACHE, module_key)
+
+    CACHE.save_to_disk()
 
 
 
@@ -317,6 +290,7 @@ def main() -> None:
     # get the whitelist, so we don't have to query many times
     white = whitelist()
     CACHE.current_whitelist = white
+    print(f"WHITELIST: {CACHE.current_whitelist}")
     BOT.run(BOT_TOKEN)
 
 
