@@ -43,9 +43,10 @@ from .helpers.domain_logic import (
     add_removal_vote,
     pop_from_whitelist,
     get_votes_threshold,
+    get_pending_applications,
 )
 from .helpers.ui import ModuleRequestView
-from .db.cache import CACHE, save_state
+from .db.cache import CACHE
 
 BOT_TOKEN = DISCORD_PARAMS.BOT_TOKEN
 GUILD_ID = DISCORD_PARAMS.GUILD_ID
@@ -80,7 +81,33 @@ def in_nominator_channel():
 @BOT.event
 async def on_ready() -> None:
     print(f"{BOT.user} is now online!")
-    await setup_module_request_ui()
+    await show_pending_applications()
+    exit(0)
+
+
+async def show_pending_applications():
+    channel = await BOT.fetch_channel(REQUEST_CHANNEL_ID)  # as integer
+    channel = check_type(channel, discord.channel.TextChannel)
+    applications = get_pending_applications()
+    embed = discord.Embed(title="New pending applications", color=discord.Color.nitro_pink())
+    #headers = ["Application ID", "Applicant", "Data", "Cost"]
+    #table_data: list[tuple[str, str, str, str]] = []
+    for app_dict in applications:
+        #row_data = (app_dict["id"], app_dict["user_id"], app_dict["data"], app_dict["application_cost"])
+        application_id = app_dict["id"]
+        applicant = app_dict["user_id"]
+        data = app_dict["data"]
+        cost = app_dict["application_cost"]
+        
+        embed.add_field(name=f"Application ID: {application_id}", value=f"Applicant: {applicant}", inline=False)
+        embed.add_field(name="Data", value=data, inline=True)
+        embed.add_field(name="Cost", value=cost, inline=True)
+        embed.add_field(name="\u200b", value="\u200b", inline=False)  # Empty field for spacing
+        embed.add_field(name="\u200b", value="[0x818589]------------------------[/0x818589]", inline=False)  # Horizontal line
+        #table_data.append(row_data)
+    #table = tabulate(table_data, headers, tablefmt="grid")
+    #await channel.send(f"```\n{table}\n```")
+    await channel.send(embed=embed)
 
 
 @BOT.slash_command(

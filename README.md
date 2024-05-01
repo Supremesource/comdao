@@ -2,10 +2,6 @@
 
 This bot is designed to manage the nomination and removal of modules from a whitelist using a multisignature address stored as a global parameter. The bot interacts with users through Discord commands. For better understanding please refer to the following issue [initial-issue](https://github.com/agicommies/subspace-network/issues/40)
 
-## Storage
-
-The bot securely stores all private keys as environment variables. These keys must add up to the exact multisignature address of the `whitelist_nominator`, which is stored as a global parameter.
-
 ## Decentralization Concerns
 
 Arguably, the bot is a single point of failure, where only one person holds all of the multisignature keys. However, the public address of the multisignature account is being stored as a global on-chain parameter. This means that if the person running the bot becomes unavailable, acts dishonestly, or is otherwise unable to continue running the bot, the governance process can vote to change the global parameter to a new multisignature address. This would effectively allow the community to replace the bot with a new instance, as the bot is fully open source and can be run by anyone.

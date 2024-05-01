@@ -8,9 +8,11 @@ from communex.key import is_ss58_address
 from substrateinterface import Keypair
 from typeguard import check_type
 
-from ..db.cache import Cache, NominationVote
+from ..db.cache import Cache, NominationVote, CACHE, save_state
 from ..config.settings import MNEMONIC, ROLE_NAME
 from ..helpers.substrate_interface import send_call
+from .substrate_interface import get_applications
+
 
 
 T = TypeVar('T', covariant=True)
@@ -20,6 +22,25 @@ class SizedIterable(Protocol[T]):
 
     def __len__(self) -> int:
         ...
+
+
+
+def get_pending_applications() -> list[dict[str, str]]:
+    update_cache = False
+    applications = get_applications()
+    pending: list[dict[str, str]] = []
+    for app in applications.values():
+        app_id = app["id"]
+        app_status = app["status"]
+        if app_status.lower() == "pending":
+            if app_id not in CACHE.dao_applications:
+                CACHE.dao_applications.append(app_id)
+                update_cache = True
+            pending.append(app)
+    if update_cache:
+        CACHE.save_to_disk()
+    return pending
+
 
 def get_votes_threshold(ctx: discord.ApplicationContext):
     guild = ctx.guild
@@ -221,3 +242,7 @@ async def pop_from_whitelist(cache: Cache, module_key: Ss58Address):
     await send_call(fn, current_keypair, call)
     with cache:
         cache.current_whitelist.remove(module_key)
+
+if __name__ == "__main__":
+   applications = get_pending_applications()
+   breakpoint()

@@ -41,6 +41,9 @@ class Cache:
     rejection_approvals: dict[str, list[Ss58Address]] = {}
     last_submission_times = {}
     current_whitelist: list[Ss58Address] = []
+    dao_applications: list[str] = []
+
+
     def __init__(self) -> None:
         self._file_path = "./state.json"
         self.load_from_disk()
@@ -53,6 +56,7 @@ class Cache:
                 'nomination_approvals': json.dumps(self.nomination_approvals),
                 'removal_approvals': json.dumps(self.removal_approvals),
                 'rejection_approvals': json.dumps(self.rejection_approvals),
+                'dao_applications': json.dumps(self.dao_applications),
             }
             with open(self._file_path, 'w') as file:
                 json.dump(data, file)
@@ -63,6 +67,7 @@ class Cache:
                 data = json.load(file)
                 self.request_ids = json.loads(data['request_ids'])
 
+                self.dao_applications = json.loads(data['dao_applications'])
                 self.removal_approvals = json.loads(data['removal_approvals'])
                 self.rejection_approvals = json.loads(data['rejection_approvals'])
                 self.nomination_approvals = {}
@@ -94,4 +99,5 @@ def save_state(cache: Cache):
                 cache.save_to_disk()
         return wrapper
     return decorator
-print(CACHE.nomination_approvals)
+
+print(CACHE.dao_applications)
