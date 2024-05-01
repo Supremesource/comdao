@@ -8,8 +8,6 @@ from discord.ext import commands
 
 #load_dotenv()
 
-MNEMONIC = os.getenv("MNEMONIC")
-assert MNEMONIC is not None
 class DiscordParams(BaseSettings):
     BOT_TOKEN: str
     GUILD_ID: int
@@ -22,12 +20,22 @@ class DiscordParams(BaseSettings):
         extra="ignore"
 
 
+class Subspace(BaseSettings):
+    MNEMONIC: str
+
+    class Config:
+        env_prefix = "SUBSPACE_"
+        env_file = "env/dev.env"
+        extra="ignore"
+
+
 ROLE_NAME = "admin"
 NODE_URL = "wss://testnet-commune-api-node-0.communeai.net"  # "wss://commune.api.onfinality.io/public-ws"
 MODULE_SUBMISSION_DELAY = 3600
 INTENTS = discord.Intents.all()
 BOT = commands.Bot(command_prefix="/", intents=INTENTS)
-
+MNEMONIC = Subspace().MNEMONIC # type: ignore
 DISCORD_PARAMS = DiscordParams()
+
 
 
