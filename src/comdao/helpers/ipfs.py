@@ -3,6 +3,7 @@ import requests
 
 
 def get_json_from_cid(cid: str) -> dict[Any, Any] | None:
+    cid = cid.split("ipfs://")[-1]
     gateway = "https://ipfs.io/ipfs/"
     try:
         result = requests.get(gateway + cid)
