@@ -14,6 +14,7 @@ from communex.types import NetworkParams, Ss58Address
 from discord.ext import commands
 from substrateinterface import Keypair
 from substrateinterface.base import ExtrinsicReceipt
+from tabulate import tabulate
 
 from .config.settings import (
     ROLE_NAME,
@@ -83,10 +84,12 @@ def to_markdown(app_obj: Application):
     assert guild
     member = guild.get_member(applicant)
     applicant = member if member else str(applicant) + " (ID)"
+    
+    unescaped_data = data.replace('\\n', '\n')
     single_mark = (
         f"Application key: **{key}**\n"
         f"Applicant: User **{applicant}**\n"
-        f"Data: **{data}**\n"
+        f"Data: \n{unescaped_data}\n"
     )
     return single_mark
 
@@ -101,12 +104,20 @@ async def show_pending_applications():
         if not applications:
             return
         chunked = [applications[i:i + 25] for i in range(0, len(applications), 25)]
+        embeds: list[discord.Embed] = []
         for chunk in chunked:
             embed = discord.Embed(title="New pending applications", color=discord.Color.nitro_pink())
             for app_obj in chunk:
                 mark = to_markdown(app_obj)
+                if len(embed) + len(mark) > 6000:
+                    embeds.append(embed)
+                    embed = discord.Embed(title="New pending applications", color=discord.Color.nitro_pink())
                 embed.add_field(name="Application", value=mark, inline=False)
+        for embed in embeds:
             await channel.send(embed=embed)
+    except Exception as e:
+        breakpoint()
+        print(e)
     finally:
         CACHE.save_to_disk()
 
