@@ -4,8 +4,7 @@ from dataclasses import dataclass
 from pydantic_settings import BaseSettings
 import discord
 from discord.ext import commands
-
-
+from communex._common import get_node_url
 #load_dotenv()
 
 class DiscordParams(BaseSettings):
@@ -29,8 +28,9 @@ class Subspace(BaseSettings):
         extra="ignore"
 
 
-ROLE_NAME = "admin"
-NODE_URL = "wss://testnet-commune-api-node-0.communeai.net"  # "wss://commune.api.onfinality.io/public-ws"
+ROLE_NAME = "dao-member"
+#NODE_URL = "wss://testnet-commune-api-node-0.communeai.net"  # "wss://commune.api.onfinality.io/public-ws"
+NODE_URL = get_node_url()
 MODULE_SUBMISSION_DELAY = 3600
 INTENTS = discord.Intents.all()
 BOT = commands.Bot(command_prefix="/", intents=INTENTS)
