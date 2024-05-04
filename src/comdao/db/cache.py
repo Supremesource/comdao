@@ -100,4 +100,4 @@ def save_state(cache: Cache):
         return wrapper
     return decorator
 
-print(CACHE.dao_applications)
+
