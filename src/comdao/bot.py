@@ -36,6 +36,7 @@ from .helpers.domain_logic import (
     pop_from_whitelist,
     get_new_pending_applications,
     get_votes_threshold,
+    build_application_embeds,
 )
 from .db.cache import CACHE, save_state
 
@@ -75,51 +76,17 @@ async def on_ready() -> None:
     show_pending_applications.start()
 
 
-def to_markdown(app_obj: Application):
-   
-    applicant = app_obj.discord_id
-    data = app_obj.body
-    key = app_obj.app_key
-    guild = BOT.get_guild(GUILD_ID)
-    assert guild
-    member = guild.get_member(applicant)
-    applicant = member if member else str(applicant) + " (ID)"
-    
-    unescaped_data = data.replace('\\n', '\n')
-    single_mark = (
-        f"Application key: **{key}**\n"
-        f"Applicant: User **{applicant}**\n"
-        f"Data: \n{unescaped_data}\n"
-    )
-    return single_mark
-
-
 @tasks.loop(seconds=600)
 async def show_pending_applications():
-    try:
-        channel = await BOT.fetch_channel(REQUEST_CHANNEL_ID)  # as integer
-        channel = check_type(channel, discord.channel.TextChannel)
-        applications = get_new_pending_applications(CACHE)
-        # circunvents discord limitation of 25 fields per embed
-        if not applications:
-            return
-        chunked = [applications[i:i + 25] for i in range(0, len(applications), 25)]
-        embeds: list[discord.Embed] = []
-        for chunk in chunked:
-            embed = discord.Embed(title="New pending applications", color=discord.Color.nitro_pink())
-            for app_obj in chunk:
-                mark = to_markdown(app_obj)
-                if len(embed) + len(mark) > 6000:
-                    embeds.append(embed)
-                    embed = discord.Embed(title="New pending applications", color=discord.Color.nitro_pink())
-                embed.add_field(name="Application", value=mark, inline=False)
-        for embed in embeds:
-            await channel.send(embed=embed)
-    except Exception as e:
-        breakpoint()
-        print(e)
-    finally:
-        CACHE.save_to_disk()
+    channel = await BOT.fetch_channel(REQUEST_CHANNEL_ID)  # as integer
+    channel = check_type(channel, discord.channel.TextChannel)
+    guild = BOT.get_guild(GUILD_ID)
+    assert guild
+    embeds = build_application_embeds(CACHE, guild)
+    for embed in embeds:
+        await channel.send(embed=embed)
+   
+    CACHE.save_to_disk()
 
 @BOT.slash_command(
     guild_ids=[GUILD_ID], description="Help command"  # ! make sure to pass as string

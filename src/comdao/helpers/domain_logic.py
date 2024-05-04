@@ -29,17 +29,60 @@ class SizedIterable(Protocol[T]):
 
 
 
-def get_new_pending_applications(cache: Cache) -> list[Application]:
+def to_markdown(app_obj: Application, guild: discord.Guild, cid: str):
+   
+    applicant = app_obj.discord_id
+    data = app_obj.body
+    key = app_obj.app_key
+    member = guild.get_member(int(applicant)) # type: ignore
+    applicant = member.name if member else str(applicant) + " (ID)"
+    
+    unescaped_data = data.replace('\\n', '\n')
+    single_mark = (
+        f"Application key: **{key}**\n"
+        f"Applicant: User **{applicant}**\n"
+        f"Data: \n{unescaped_data}"
+    )
+    if len(single_mark) > 1024:
+        new_data = f"Too large to display. You can [query the data via IPFS](https://ipfs.io/ipfs/{cid}) to see the full proposal."
+        single_mark = (
+        f"Application key: **{key}**\n"
+        f"Applicant: User **{applicant}**\n"
+        f"Data: {new_data}"
+        )
+    return single_mark
+
+
+def build_application_embeds(cache: Cache, guild: discord.Guild):
+    applications = get_new_pending_applications(cache)
+    if not applications:
+        return []
+    # circumvents discord limitation of 25 fields per embed
+    chunked = [applications[i:i + 25] for i in range(0, len(applications), 25)]
+    embeds: list[discord.Embed] = []
+    for chunk in chunked:
+        embed = discord.Embed(title="New pending applications", color=discord.Color.nitro_pink())
+        for app_obj, cid in chunk:
+            mark = to_markdown(app_obj, guild, cid)
+            if len(embed) + len(mark) > 6000:
+                embeds.append(embed)
+                embed = discord.Embed(title="New pending applications", color=discord.Color.nitro_pink())
+            embed.add_field(name="Application", value=mark, inline=False)
+        embeds.append(embed)
+
+    return embeds
+
+def get_new_pending_applications(cache: Cache):
     applications = get_applications()
-    pending: list[Application] = []
+    pending: list[tuple[Application, str]] = []
     for app in applications.values():
         try:
             app_id = app["id"]
             app_status = app["status"]
-            proposal_dict = get_json_from_cid(app["data"])
+            cid = app["data"].split("ipfs://")[-1]
+            proposal_dict = get_json_from_cid(cid)
             if not proposal_dict:
                 continue
-
             ss58_key = app["user_id"]
             assert is_ss58_address(ss58_key)
             application_obj = Application(
@@ -53,7 +96,7 @@ def get_new_pending_applications(cache: Cache) -> list[Application]:
                 if app_id not in cache.dao_applications:
                     cache.dao_applications.append(app_id)
                     cache.request_ids.append(ss58_key)
-                    pending.append(application_obj)
+                    pending.append((application_obj, cid))
         except Exception as e:
             print(e)
             continue
@@ -265,6 +308,6 @@ async def pop_from_whitelist(cache: Cache, module_key: Ss58Address):
 if __name__ == "__main__":
 #    applications = get_applications()
 #    print(applications)
-#    breakpoint()
+    breakpoint()
     ths = get_votes_threshold("afsds")
     print(ths)
