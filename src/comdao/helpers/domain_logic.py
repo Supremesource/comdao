@@ -53,6 +53,41 @@ def to_markdown(app_obj: Application, guild: discord.Guild, cid: str):
     return single_mark
 
 
+def to_markdown_list(app_obj_lst: list[tuple[Application, str]], guild: discord.Guild):
+    markdowns: list[str] = []
+    for app_obj, cid in app_obj_lst:
+        applicant = app_obj.discord_id
+        data = app_obj.body
+        key = app_obj.app_key
+        member = guild.get_member(int(applicant)) # type: ignore
+        applicant = member.name if member else str(applicant) + " (ID)"
+        
+        unescaped_data = data.replace('\\n', '\n')
+        if unescaped_data:
+            # removes trailling quotes of json
+            if unescaped_data[0] == '"':
+                unescaped_data = unescaped_data[1:]
+            if unescaped_data[-1] == '"':
+                unescaped_data = unescaped_data[:-1]
+        single_mark = (
+            "> **New application!**\n"
+            f"> Application key: **{key}**\n"
+            f"> Applicant: User **{applicant}**\n"
+            f"> Data: \n{unescaped_data}\n"
+            "- - -"
+        )
+        if len(single_mark) > 4000:
+            new_data = f"Too large to display. You can [query the data via IPFS](https://ipfs.io/ipfs/{cid}) to see the full proposal."
+            single_mark = (
+            "> **New application!**\n"
+            f"> Application key: **{key}**\n"
+            f"> Applicant: User **{applicant}**\n"
+            f"> Data: {new_data}\n"
+            "- - -"
+        )
+        markdowns.append(single_mark)
+    return markdowns
+
 def build_application_embeds(cache: Cache, guild: discord.Guild):
     applications = get_new_pending_applications(cache)
     if not applications:
@@ -60,15 +95,17 @@ def build_application_embeds(cache: Cache, guild: discord.Guild):
     # circumvents discord limitation of 25 fields per embed
     chunked = [applications[i:i + 25] for i in range(0, len(applications), 25)]
     embeds: list[discord.Embed] = []
-    for chunk in chunked:
-        embed = discord.Embed(title="New pending applications", color=discord.Color.nitro_pink())
-        for app_obj, cid in chunk:
-            mark = to_markdown(app_obj, guild, cid)
-            if len(embed) + len(mark) > 6000:
-                embeds.append(embed)
-                embed = discord.Embed(title="New pending applications", color=discord.Color.nitro_pink())
-            embed.add_field(name="Application", value=mark, inline=False)
-        embeds.append(embed)
+    mardkown = to_markdown_list(applications, guild)
+    return mardkown
+    # for chunk in chunked:
+    #     embed = discord.Embed(title="New pending applications", color=discord.Color.nitro_pink())
+    #     for app_obj, cid in chunk:
+    #         mark = to_markdown(app_obj, guild, cid)
+    #         if len(embed) + len(mark) > 6000:
+    #             embeds.append(embed)
+    #             embed = discord.Embed(title="New pending applications", color=discord.Color.nitro_pink())
+    #         embed.add_field(name="Application", value=mark, inline=False)
+    #     embeds.append(embed)
 
     return embeds
 

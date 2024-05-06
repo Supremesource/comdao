@@ -84,8 +84,8 @@ async def show_pending_applications():
     assert guild
     embeds = build_application_embeds(CACHE, guild)
     for embed in embeds:
-        await channel.send(embed=embed)
-   
+        await channel.send(embed)
+    # await channel.send(embeds)
     CACHE.save_to_disk()
 
 @BOT.slash_command(
