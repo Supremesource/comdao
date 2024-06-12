@@ -1,7 +1,9 @@
-from typing import Iterable, Sized, TypeVar, Protocol, Iterator
+from typing import Iterable, Sized, TypeVar, Protocol, Iterator, cast
 import statistics
 import html
 import json
+from queue import Queue
+from time import time
 
 import discord
 from communex.types import Ss58Address
@@ -9,14 +11,13 @@ from communex.key import is_ss58_address
 from substrateinterface import Keypair
 from typeguard import check_type
 
-from ..db.cache import Cache, NominationVote, CACHE, save_state
-from ..config.settings import MNEMONIC, ROLE_NAME
+from ..db.cache import Cache, NominationVote
+from ..config.settings import MNEMONIC, ROLE_NAME, MAXIMUM_VOTING_AGE
 from ..config.application import Application
 from .substrate_interface import send_call
 from .substrate_interface import get_applications
 
 from .ipfs import get_json_from_cid
-
 
 
 T = TypeVar('T', covariant=True)
@@ -28,6 +29,8 @@ class SizedIterable(Protocol[T]):
         ...
 
 
+RENDERED_APPLICATIONS_QUEUE = Queue[tuple[Application, str]]()
+APP_BEING_VOTED = None
 
 def to_markdown(app_obj: Application, guild: discord.Guild, cid: str):
    
@@ -61,7 +64,7 @@ def to_markdown_list(app_obj_lst: list[tuple[Application, str]], guild: discord.
         key = app_obj.app_key
         member = guild.get_member(int(applicant)) # type: ignore
         applicant = member.name if member else str(applicant) + " (ID)"
-        
+        app_id = app_obj.app_id
         unescaped_data = data.replace('\\n', '\n')
         if unescaped_data:
             # removes trailling quotes of json
@@ -73,6 +76,7 @@ def to_markdown_list(app_obj_lst: list[tuple[Application, str]], guild: discord.
             "> **New application!**\n"
             f"> Application key: **{key}**\n"
             f"> Applicant: User **{applicant}**\n"
+            f"> Application ID: **{app_id}**\n"
             f"> Data: \n{unescaped_data}\n"
             "- - -"
         )
@@ -90,24 +94,36 @@ def to_markdown_list(app_obj_lst: list[tuple[Application, str]], guild: discord.
 
 def build_application_embeds(cache: Cache, guild: discord.Guild):
     applications = get_new_pending_applications(cache)
-    if not applications:
-        return []
+    print(applications)
     # circumvents discord limitation of 25 fields per embed
-    chunked = [applications[i:i + 25] for i in range(0, len(applications), 25)]
-    embeds: list[discord.Embed] = []
-    mardkown = to_markdown_list(applications, guild)
-    return mardkown
-    # for chunk in chunked:
-    #     embed = discord.Embed(title="New pending applications", color=discord.Color.nitro_pink())
-    #     for app_obj, cid in chunk:
-    #         mark = to_markdown(app_obj, guild, cid)
-    #         if len(embed) + len(mark) > 6000:
-    #             embeds.append(embed)
-    #             embed = discord.Embed(title="New pending applications", color=discord.Color.nitro_pink())
-    #         embed.add_field(name="Application", value=mark, inline=False)
-    #     embeds.append(embed)
+    with cache:
+        for app in applications:
+            cache.render_applications_queue.append(app)
+        if (
+            cache.app_being_voted is not None and
+            time() - cache.app_being_voted_age > MAXIMUM_VOTING_AGE
+        ):
+            app_id = cache.app_being_voted[0].app_id
+            reffusal_message = (
+                f"Putting application {app_id} to end of queue because "
+                "the voting took too long"
+            )
+            print(reffusal_message)
+            cache.render_applications_queue.append(cache.app_being_voted)
+            cache.app_being_voted = None
+            cache.app_being_voted_age = time()
+        if (
+            not cache.app_being_voted and 
+            len(cache.render_applications_queue) > 0
+        ):
+            cache.app_being_voted = cache.render_applications_queue.pop(0)
+            cache.app_being_voted_age = time()
+            being_voted = cast(tuple[Application, str], cache.app_being_voted)
+            markdown = to_markdown_list([being_voted], guild)
+            return markdown
+        else:
+            return []
 
-    return embeds
 
 def get_new_pending_applications(cache: Cache):
     applications = get_applications()
@@ -182,18 +198,6 @@ async def valid_for_approval(
         ) -> bool:
     
     user_id = str(ctx.author.id)
-    approvals_by_user = cache.nomination_approvals.get(user_id, [])
-    modules_approved = [approval.module_key for approval in approvals_by_user]
-    if module_key in modules_approved:
-        await ctx.respond(f"You have already nominated `{module_key}`.", ephemeral=True)
-        return False
-
-    if module_key not in cache.request_ids:
-        await ctx.respond(
-            f"Module key `{module_key}` is not submitted for access, open a request.",
-            ephemeral=True,
-        )
-        return False
 
     rejected_by_user = cache.rejection_approvals.get(user_id, [])
     if module_key in rejected_by_user:
@@ -248,15 +252,9 @@ async def push_to_white_list(cache: Cache, module_key: Ss58Address):
 async def valid_for_rejection(
         ctx: discord.ApplicationContext, 
         cache: Cache,
-        module_key: str,
+        application_id: int,
         reason: str,
     ) -> bool:
-    
-    user_id = str(ctx.author.id)
-    module_key = html.escape(module_key.strip())
-    if not is_ss58_address(module_key):
-        await ctx.respond("Invalid module key.", ephemeral=True)
-        return False
     
     reason = html.escape(reason.strip())
     if not reason:
@@ -264,24 +262,26 @@ async def valid_for_rejection(
             "Please provide a valid reason for rejection.", ephemeral=True
         )
         return False
-    
-    rejected_modules = cache.rejection_approvals.get(user_id, [])
-    if module_key in rejected_modules:
-        await ctx.respond(f"You have already rejected `{module_key}`.", ephemeral=True)
-        return False
-    
+        
     return True
 
 
 def add_rejection_vote(
         cache: Cache,
         user_id: str,
-        module_key: Ss58Address,
+        application_id: int,
     ):
     with cache:
         rejected_by_user = cache.rejection_approvals.get(user_id, [])
-        rejected_by_user.append(module_key)
+        rejected_by_user.append(application_id)
         cache.rejection_approvals[user_id] = rejected_by_user
+
+        reffusal_count = 0
+        for votes in cache.rejection_approvals.values():
+            for vote in votes:
+                if vote == application_id:
+                    reffusal_count += 1
+        return reffusal_count
 
 
 async def valid_for_removal(
@@ -345,6 +345,5 @@ async def pop_from_whitelist(cache: Cache, module_key: Ss58Address):
 if __name__ == "__main__":
 #    applications = get_applications()
 #    print(applications)
-    breakpoint()
-    ths = get_votes_threshold("afsds")
+    ths = get_votes_threshold("afsds") # type: ignore
     print(ths)

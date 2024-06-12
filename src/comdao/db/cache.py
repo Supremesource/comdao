@@ -1,7 +1,11 @@
 from typing import Callable, TypeVar, ParamSpec, Coroutine, Any
-from communex.types import Ss58Address
 from threading import Lock
 import json
+
+from communex.types import Ss58Address
+
+from comdao.config.application import Application
+
 
 class NominationVote(dict):
     def __init__(
@@ -38,11 +42,13 @@ class Cache:
     # discord_user_id : voted_ticket_id
     nomination_approvals: dict[str, list[NominationVote]] = {}
     removal_approvals: dict[str, list[Ss58Address]] = {}
-    rejection_approvals: dict[str, list[Ss58Address]] = {}
+    rejection_approvals: dict[str, list[int]] = {}
     last_submission_times = {}
     current_whitelist: list[Ss58Address] = []
     dao_applications: list[str] = []
-
+    render_applications_queue: list[tuple[Application, str]] = []
+    app_being_voted: tuple[Application, str] | None = None
+    app_being_voted_age: float = 0
 
     def __init__(self) -> None:
         self._file_path = "./state.json"
@@ -51,12 +57,23 @@ class Cache:
 
     def save_to_disk(self):
             print("SAVING TO DISK")
+            if self.app_being_voted:
+                app = (self.app_being_voted[0].model_dump(), self.app_being_voted[1])
+            else:
+                app = None
             data = {
                 'request_ids': json.dumps(self.request_ids),
                 'nomination_approvals': json.dumps(self.nomination_approvals),
                 'removal_approvals': json.dumps(self.removal_approvals),
                 'rejection_approvals': json.dumps(self.rejection_approvals),
                 'dao_applications': json.dumps(self.dao_applications),
+                'render_applications_queue': json.dumps(
+                    [
+                        (app.model_dump(), status) for app, status in self.render_applications_queue
+                    ]
+                ),                    
+                'app_being_voted': json.dumps(app),
+                "app_being_voted_age": json.dumps(self.app_being_voted_age)
             }
             with open(self._file_path, 'w') as file:
                 json.dump(data, file)
@@ -70,6 +87,19 @@ class Cache:
                 self.dao_applications = json.loads(data['dao_applications'])
                 self.removal_approvals = json.loads(data['removal_approvals'])
                 self.rejection_approvals = json.loads(data['rejection_approvals'])
+                self.app_being_voted_age = json.loads(data['app_being_voted_age'])
+                
+                app = json.loads(data['app_being_voted'])
+                if app:
+                    self.app_being_voted = (
+                        Application.model_validate(app[0]), app[1]
+                    )
+                else:
+                    self.app_being_voted = None
+                self.render_applications_queue = [
+                (Application.model_validate(app_dict), status)
+                for app_dict, status in json.loads(data['render_applications_queue'])
+                ]
                 self.nomination_approvals = {}
                 votes_dict = json.loads(data['nomination_approvals'])
                 for user_id in votes_dict:
@@ -86,7 +116,6 @@ class Cache:
     def __exit__(self, *args, **kwargs):
         self.lock.release()
 
-CACHE = Cache()
 T = TypeVar('T')
 P = ParamSpec("P")
 def save_state(cache: Cache):
@@ -101,3 +130,4 @@ def save_state(cache: Cache):
     return decorator
 
 
+CACHE = Cache()

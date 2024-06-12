@@ -7,13 +7,10 @@ import discord
 from discord.ext import tasks
 # for valid url
 from typeguard import check_type
-from communex.client import CommuneClient
-from communex.compat.key import classic_load_key
 from communex.key import is_ss58_address
-from communex.types import NetworkParams, Ss58Address
+from communex.types import Ss58Address
 from discord.ext import commands
-from substrateinterface import Keypair
-from substrateinterface.base import ExtrinsicReceipt
+from comdao.helpers.substrate_interface import refuse_dao_application
 from tabulate import tabulate
 
 from .config.settings import (
@@ -21,8 +18,7 @@ from .config.settings import (
     BOT,
     DISCORD_PARAMS,
 )
-from .config.application import Application
-from .helpers.substrate_interface import whitelist, send_call
+from .helpers.substrate_interface import whitelist
 from .helpers.errors import on_application_command_error
 from .helpers.domain_logic import (
     get_member_stats, 
@@ -34,11 +30,10 @@ from .helpers.domain_logic import (
     valid_for_removal,
     add_removal_vote,
     pop_from_whitelist,
-    get_new_pending_applications,
     get_votes_threshold,
     build_application_embeds,
 )
-from .db.cache import CACHE, save_state
+from .db.cache import CACHE
 
 BOT_TOKEN = DISCORD_PARAMS.BOT_TOKEN
 GUILD_ID = DISCORD_PARAMS.GUILD_ID
@@ -84,9 +79,9 @@ async def show_pending_applications():
     assert guild
     embeds = build_application_embeds(CACHE, guild)
     for embed in embeds:
-        await channel.send(embed)
-    # await channel.send(embeds)
-    CACHE.save_to_disk()
+        await channel.send(embed) # type: ignore
+    with CACHE:
+        CACHE.save_to_disk()
 
 @BOT.slash_command(
     guild_ids=[GUILD_ID], description="Help command"  # ! make sure to pass as string
@@ -149,7 +144,7 @@ async def stats(ctx: discord.ApplicationContext) -> None:
 async def approve(
     ctx: discord.ApplicationContext, 
     module_key: str,
-    recommended_weight: int
+    recommended_weight: int 
     ) -> None:
     # Validate and sanitize the module_key input
     module_key = html.escape(module_key.strip())
@@ -190,9 +185,7 @@ async def approve(
     )
     if agreement_count >= threshold:
         await push_to_white_list(CACHE, module_key)
-
-        print(CACHE.request_ids)
-        CACHE.save_to_disk()
+    CACHE.save_to_disk()
 
 @BOT.slash_command(
     guild_ids=[GUILD_ID],  # ! make sure to pass as string
@@ -203,19 +196,23 @@ async def approve(
 @commands.has_role(ROLE_NAME)
 @commands.cooldown(1, 60, commands.BucketType.user)
 @in_nominator_channel()
-async def reject(ctx: discord.ApplicationContext, module_key: str, reason: str) -> None:
+async def reject(ctx: discord.ApplicationContext, module_id: int, reason: str) -> None:
     # Validate and sanitize the module_key input
-    valid = await valid_for_rejection(ctx, CACHE, module_key, reason)
+    valid = await valid_for_rejection(ctx, CACHE, module_id, reason)
     if not valid:
         return
 
     # Acquire the lock before modifying rejection_approvals
     user_id = str(ctx.author.id)
-    module_key = check_type(module_key, Ss58Address)
-    add_rejection_vote(CACHE, user_id, module_key)
+    rejection_count = add_rejection_vote(CACHE, user_id, module_id)
     await ctx.respond(
-        f"{ctx.author.mention} is rejecting the module `{module_key}` for the reason: `{reason}`."
+        f"{ctx.author.mention} is rejecting the module `{module_id}` for the reason: `{reason}`."
     )
+
+    threshold = get_votes_threshold(ctx)
+    if rejection_count >= threshold:
+        refuse_dao_application(module_id)
+
     CACHE.save_to_disk()
 
 @BOT.slash_command(

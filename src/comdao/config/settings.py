@@ -27,15 +27,16 @@ class Subspace(BaseSettings):
         env_file = "env/dev.env"
         extra="ignore"
 
-
+MINUTES = 60 * 60
+HOURS = MINUTES * 60
+DAYS = HOURS * 24
 ROLE_NAME = "dao-member"
 #NODE_URL = "wss://testnet-commune-api-node-0.communeai.net"  # "wss://commune.api.onfinality.io/public-ws"
-NODE_URL = get_node_url()
+USE_TESTNET = True
+NODE_URL = get_node_url(use_testnet=True)
 MODULE_SUBMISSION_DELAY = 3600
 INTENTS = discord.Intents.all()
 BOT = commands.Bot(command_prefix="/", intents=INTENTS)
 MNEMONIC = Subspace().MNEMONIC # type: ignore
 DISCORD_PARAMS = DiscordParams()
-
-
-
+MAXIMUM_VOTING_AGE = DAYS * 1
