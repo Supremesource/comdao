@@ -79,8 +79,8 @@ async def show_pending_applications():
     guild = BOT.get_guild(GUILD_ID)
     assert guild
     embeds = build_application_embeds(CACHE, guild)
-    role = guild.get_role()
-    role: discord.Role = discord.utils.get(guild.roles, name=ROLE_NAME) # type: ignore
+    role = guild.get_role(ROLE_ID)
+    role = check_type(role, discord.Role)
     reply_message = (
         "Please use the commands `/approve` or `/reject` to vote. "
         "If the propposal is accepted, " 
