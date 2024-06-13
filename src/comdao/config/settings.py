@@ -31,11 +31,12 @@ MINUTES = 60 * 60
 HOURS = MINUTES * 60
 DAYS = HOURS * 24
 ROLE_NAME = "dao-member"
+ROLE_ID = 1225528654964985986
 #NODE_URL = "wss://testnet-commune-api-node-0.communeai.net"  # "wss://commune.api.onfinality.io/public-ws"
 USE_TESTNET = False
 MODULE_SUBMISSION_DELAY = 3600
 INTENTS = discord.Intents.all()
 BOT = commands.Bot(command_prefix="/", intents=INTENTS)
 MNEMONIC = Subspace().MNEMONIC # type: ignore
-DISCORD_PARAMS = DiscordParams()
+DISCORD_PARAMS = DiscordParams() # type: ignore
 MAXIMUM_VOTING_AGE = DAYS * 1

@@ -17,6 +17,7 @@ from .config.settings import (
     ROLE_NAME,
     BOT,
     DISCORD_PARAMS,
+    ROLE_ID,
 )
 from .helpers.substrate_interface import whitelist
 from .helpers.errors import on_application_command_error
@@ -78,6 +79,7 @@ async def show_pending_applications():
     guild = BOT.get_guild(GUILD_ID)
     assert guild
     embeds = build_application_embeds(CACHE, guild)
+    role = guild.get_role()
     role: discord.Role = discord.utils.get(guild.roles, name=ROLE_NAME) # type: ignore
     reply_message = (
         "Please use the commands `/approve` or `/reject` to vote. "
@@ -118,7 +120,8 @@ async def help(ctx) -> None:
 async def stats(ctx: discord.ApplicationContext) -> None:
     guild = ctx.guild
     assert guild
-    role: discord.Role = discord.utils.get(guild.roles, name=ROLE_NAME)
+    #role: discord.Role = discord.utils.get(guild.roles, name=ROLE_NAME)
+    role = guild.get_role(ROLE_ID)
     role = check_type(role, discord.Role)
     members = role.members
     stats_data = get_member_stats(
@@ -168,10 +171,6 @@ async def approve(
         return
 
     user_id = str(ctx.author.id)
-    guild = ctx.guild
-    guild = check_type(guild, discord.Guild)
-    role = discord.utils.get(guild.roles, name=ROLE_NAME)
-    role = check_type(role, discord.Role)
     threshold = get_votes_threshold(ctx)
     #threshold = 1
 

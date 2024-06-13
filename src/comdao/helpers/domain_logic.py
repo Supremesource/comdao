@@ -12,7 +12,7 @@ from substrateinterface import Keypair
 from typeguard import check_type
 
 from ..db.cache import Cache, NominationVote
-from ..config.settings import MNEMONIC, ROLE_NAME, MAXIMUM_VOTING_AGE
+from ..config.settings import MNEMONIC, ROLE_NAME, MAXIMUM_VOTING_AGE, ROLE_ID
 from ..config.application import Application
 from .substrate_interface import send_call
 from .substrate_interface import get_applications
@@ -159,7 +159,8 @@ def get_votes_threshold(ctx: discord.ApplicationContext):
     guild = ctx.guild
     #guild = discord.Client().get_guild(919913039682220062)
     guild = check_type(guild, discord.Guild)
-    nominators = discord.utils.get(guild.roles, name=ROLE_NAME)
+    #nominators = discord.utils.get(guild.roles, name=ROLE_NAME)
+    nominators = guild.get_role(ROLE_ID)
     nominators = check_type(nominators, discord.Role)
     signatores_count = len(nominators.members)
     threshold = signatores_count // 2 + 1
