@@ -94,7 +94,6 @@ def to_markdown_list(app_obj_lst: list[tuple[Application, str]], guild: discord.
 
 def build_application_embeds(cache: Cache, guild: discord.Guild):
     applications = get_new_pending_applications(cache)
-    print(applications)
     # circumvents discord limitation of 25 fields per embed
     with cache:
         for app in applications:
