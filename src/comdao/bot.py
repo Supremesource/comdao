@@ -78,8 +78,17 @@ async def show_pending_applications():
     guild = BOT.get_guild(GUILD_ID)
     assert guild
     embeds = build_application_embeds(CACHE, guild)
+    role: discord.Role = discord.utils.get(guild.roles, name=ROLE_NAME) # type: ignore
+    reply_message = (
+        "Please use the commands `/approve` or `/reject` to vote. "
+        "If the propposal is accepted, " 
+        "the module will be added to the DAO whitelist "
+        "and will be eligible to register on the subnet 0."
+
+    )
     for embed in embeds:
-        await channel.send(embed) # type: ignore
+        sent_message: discord.Message = await channel.send(embed) # type: ignore
+        await sent_message.reply(role.mention + "\n" + reply_message)
     with CACHE:
         CACHE.save_to_disk()
 
