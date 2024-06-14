@@ -128,11 +128,8 @@ def build_application_embeds(cache: Cache, guild: discord.Guild):
                 channel = check_type(channel, discord.channel.TextChannel)
                 role = guild.get_role(ROLE_ID)
                 role = check_type(role, discord.Role)
-                overwrites = {
-                guild.default_role: discord.PermissionOverwrite(read_messages=False, send_messages=False),
-                discord_user: discord.PermissionOverwrite(read_messages=False, send_messages=False),
-                role: discord.PermissionOverwrite(read_messages=True, send_messages=True, use_slash_commands=True),
-                }
+                overwrites = channel.overwrites # type: ignore just one more ignore bro
+                overwrites[discord_user] = discord.PermissionOverwrite(read_messages=False, send_messages=False)
                 asyncio.run(channel.edit(overwrites=overwrites)) # type: ignore I HATE pycord
 
             cache.render_applications_queue.append(cache.app_being_voted)

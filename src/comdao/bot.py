@@ -92,12 +92,10 @@ async def show_pending_applications():
         )
 
         discord_user = guild.get_member(int(discord_uid))
-        overwrites = {
-        guild.default_role: discord.PermissionOverwrite(read_messages=False, send_messages=False),
-        discord_user: discord.PermissionOverwrite(read_messages=True, send_messages=True),
-        role: discord.PermissionOverwrite(read_messages=True, send_messages=True, use_slash_commands=True),
-        }
+
         if discord_user is not None:
+            overwrites = channel.overwrites # type: ignore just one more ignore bro
+            overwrites[discord_user] = discord.PermissionOverwrite(read_messages=True, send_messages=True)
             await channel.edit(overwrites=overwrites) # type: ignore I HATE pycord
         sent_message: discord.Message = await channel.send(markdown) # type: ignore
         await sent_message.reply(role.mention + "\n" + reply_message)
@@ -211,12 +209,10 @@ async def approve(
         await push_to_white_list(CACHE, application_key)
         CACHE.app_being_voted = None
         CACHE.app_being_voted_age = 0
-        overwrites = {
-        guild.default_role: discord.PermissionOverwrite(read_messages=False, send_messages=False),
-        discord_user: discord.PermissionOverwrite(read_messages=False, send_messages=False),
-        role: discord.PermissionOverwrite(read_messages=True, send_messages=True, use_slash_commands=True),
-        }
-        await ctx.channel.edit(overwrites=overwrites) # type: ignore I HATE pycord
+        if discord_user is not None:
+            overwrites = ctx.channel.overwrites # type: ignore just one more ignore bro
+            overwrites[discord_user] = discord.PermissionOverwrite(read_messages=False, send_messages=False)
+            await ctx.channel.edit(overwrites=overwrites) # type: ignore I HATE pycord
     CACHE.save_to_disk()
 
 @BOT.slash_command(
@@ -250,12 +246,10 @@ async def reject(ctx: discord.ApplicationContext, module_id: int, reason: str) -
         refuse_dao_application(module_id)
         CACHE.app_being_voted = None
         CACHE.app_being_voted_age = 0
-        overwrites = {
-        guild.default_role: discord.PermissionOverwrite(read_messages=False, send_messages=False),
-        discord_user: discord.PermissionOverwrite(read_messages=False, send_messages=False),
-        role: discord.PermissionOverwrite(read_messages=True, send_messages=True, use_slash_commands=True),
-        }
-        await ctx.channel.edit(overwrites=overwrites) # type: ignore I HATE pycord
+        if discord_user is not None:
+            overwrites = ctx.channel.overwrites # type: ignore just one more ignore bro
+            overwrites[discord_user] = discord.PermissionOverwrite(read_messages=False, send_messages=False)
+            await ctx.channel.edit(overwrites=overwrites) # type: ignore I HATE pycord
 
 
     CACHE.save_to_disk()
