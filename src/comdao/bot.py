@@ -93,9 +93,9 @@ async def show_pending_applications():
 
         discord_user = guild.get_member(int(discord_uid))
         overwrites = {
-        guild.default_role: discord.PermissionOverwrite(read_messages=False),
+        guild.default_role: discord.PermissionOverwrite(read_messages=False, send_messages=False),
         discord_user: discord.PermissionOverwrite(read_messages=True, send_messages=True),
-        role: discord.PermissionOverwrite(read_messages=True, send_messages=True),
+        role: discord.PermissionOverwrite(read_messages=True, send_messages=True, use_slash_commands=True),
         }
         if discord_user is not None:
             await channel.edit(overwrites=overwrites) # type: ignore I HATE pycord
@@ -212,10 +212,9 @@ async def approve(
         CACHE.app_being_voted = None
         CACHE.app_being_voted_age = 0
         overwrites = {
-        guild.default_role: discord.PermissionOverwrite(read_messages=False),
+        guild.default_role: discord.PermissionOverwrite(read_messages=False, send_messages=False),
         discord_user: discord.PermissionOverwrite(read_messages=False, send_messages=False),
-        role: discord.PermissionOverwrite(read_messages=True, send_messages=True),
-
+        role: discord.PermissionOverwrite(read_messages=True, send_messages=True, use_slash_commands=True),
         }
         await ctx.channel.edit(overwrites=overwrites) # type: ignore I HATE pycord
     CACHE.save_to_disk()
@@ -252,9 +251,9 @@ async def reject(ctx: discord.ApplicationContext, module_id: int, reason: str) -
         CACHE.app_being_voted = None
         CACHE.app_being_voted_age = 0
         overwrites = {
-        guild.default_role: discord.PermissionOverwrite(read_messages=False),
+        guild.default_role: discord.PermissionOverwrite(read_messages=False, send_messages=False),
         discord_user: discord.PermissionOverwrite(read_messages=False, send_messages=False),
-        role: discord.PermissionOverwrite(read_messages=True, send_messages=True),
+        role: discord.PermissionOverwrite(read_messages=True, send_messages=True, use_slash_commands=True),
         }
         await ctx.channel.edit(overwrites=overwrites) # type: ignore I HATE pycord
 

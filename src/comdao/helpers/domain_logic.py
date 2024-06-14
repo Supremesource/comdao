@@ -129,9 +129,9 @@ def build_application_embeds(cache: Cache, guild: discord.Guild):
                 role = guild.get_role(ROLE_ID)
                 role = check_type(role, discord.Role)
                 overwrites = {
-                guild.default_role: discord.PermissionOverwrite(read_messages=False),
+                guild.default_role: discord.PermissionOverwrite(read_messages=False, send_messages=False),
                 discord_user: discord.PermissionOverwrite(read_messages=False, send_messages=False),
-                role: discord.PermissionOverwrite(read_messages=True, send_messages=True)
+                role: discord.PermissionOverwrite(read_messages=True, send_messages=True, use_slash_commands=True),
                 }
                 asyncio.run(channel.edit(overwrites=overwrites)) # type: ignore I HATE pycord
 
