@@ -49,6 +49,7 @@ class Cache:
     render_applications_queue: list[tuple[Application, str]] = []
     app_being_voted: tuple[Application, str] | None = None
     app_being_voted_age: float = 0
+    applicator_discord_id: str = ""
 
     def __init__(self) -> None:
         self._file_path = "./state.json"
@@ -73,7 +74,8 @@ class Cache:
                     ]
                 ),                    
                 'app_being_voted': json.dumps(app),
-                "app_being_voted_age": json.dumps(self.app_being_voted_age)
+                "app_being_voted_age": json.dumps(self.app_being_voted_age),
+                "applicator_discord_id": json.dumps(self.applicator_discord_id),
             }
             with open(self._file_path, 'w') as file:
                 json.dump(data, file)
@@ -88,6 +90,7 @@ class Cache:
                 self.removal_approvals = json.loads(data['removal_approvals'])
                 self.rejection_approvals = json.loads(data['rejection_approvals'])
                 self.app_being_voted_age = json.loads(data['app_being_voted_age'])
+                self.applicator_discord_id = json.loads(data['applicator_discord_id'])
                 
                 app = json.loads(data['app_being_voted'])
                 if app:

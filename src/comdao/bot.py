@@ -78,18 +78,27 @@ async def show_pending_applications():
     channel = check_type(channel, discord.channel.TextChannel)
     guild = BOT.get_guild(GUILD_ID)
     assert guild
-    embeds = build_application_embeds(CACHE, guild)
-    role = guild.get_role(ROLE_ID)
-    role = check_type(role, discord.Role)
-    reply_message = (
-        "Please use the commands `/approve` or `/reject` to vote. "
-        "If the propposal is accepted, " 
-        "the module will be added to the DAO whitelist "
-        "and will be eligible to register on the subnet 0."
+    markdown, discord_uid = build_application_embeds(CACHE, guild)
+    # means that we have a new application to be displayed
+    if markdown and discord_uid is not None:
+        role = guild.get_role(ROLE_ID)
+        role = check_type(role, discord.Role)
+        reply_message = (
+            "Please use the commands `/approve` or `/reject` to vote. "
+            "If the propposal is accepted, " 
+            "the module will be added to the DAO whitelist "
+            "and will be eligible to register on the subnet 0."
 
-    )
-    for embed in embeds:
-        sent_message: discord.Message = await channel.send(embed) # type: ignore
+        )
+
+        discord_user = guild.get_member(int(discord_uid))
+        overwrites = {
+        guild.default_role: discord.PermissionOverwrite(read_messages=False),
+        discord_user: discord.PermissionOverwrite(read_messages=True, send_messages=True)
+        }
+        if discord_user is not None:
+            await channel.edit(overwrites=overwrites) # type: ignore I HATE pycord
+        sent_message: discord.Message = await channel.send(markdown) # type: ignore
         await sent_message.reply(role.mention + "\n" + reply_message)
     with CACHE:
         CACHE.save_to_disk()
@@ -100,9 +109,9 @@ async def show_pending_applications():
 @commands.cooldown(1, 10, commands.BucketType.user)
 async def help(ctx) -> None:
     help_message = """🚀 **Commune DAO Commands:**
-1. `/approve <ss58 key>` - Approves a module for whitelist.
-2. `/remove <ss58 key> <reason>` - Removes a module from the whitelist. 
-3. `/reject <ss58 key> <reason>` - Rejects a module approval.
+1. `/approve <ss58 key> <recommended_weight (int 1 ~ 100)>` - Approves a module for whitelist and sets the weight as the median of the weights passed on votes.
+2. `/reject <ss58 key> <reason>` - Rejects a module approval.
+3. `/remove <ss58 key> <reason>` - Vote to remove a module from the whitelist. 
 4. `/stats` - Lists a table of members and their `multisig_participation_count` and `multisig_abscence_count`, ranked by participation.
 5. `/help` - Displays this help message.
 
@@ -155,30 +164,34 @@ async def stats(ctx: discord.ApplicationContext) -> None:
 @in_nominator_channel()
 async def approve(
     ctx: discord.ApplicationContext, 
-    module_key: str,
-    recommended_weight: int 
+    application_id: int,
+    recommended_weight: int,
     ) -> None:
     # Validate and sanitize the module_key input
-    module_key = html.escape(module_key.strip())
-    if not is_ss58_address(module_key):
-        await ctx.respond("Invalid module key.", ephemeral=True)
-        return
     if recommended_weight <= 0 or recommended_weight > 100:
         await ctx.respond(
             "Invalid recommended weight. It should be a value between 1 and 100.", 
             ephemeral=True
             )
         return
+    curr_app = CACHE.app_being_voted
+    if not curr_app or curr_app[0].app_id != application_id:
+        await ctx.respond("Invalid application id.", ephemeral=True)
+        return
+    application_key = curr_app[0].app_key
 
     user_id = str(ctx.author.id)
     threshold = get_votes_threshold(ctx)
     #threshold = 1
 
-    valid = await valid_for_approval(module_key, CACHE, ctx)
+    valid = await valid_for_approval(application_key, CACHE, ctx)
     if not valid:
         return
     
-    agreement_count = add_approval_vote(CACHE, user_id, module_key, recommended_weight)
+    guild = ctx.guild
+    assert guild
+    discord_user = guild.get_member(int(CACHE.applicator_discord_id))
+    agreement_count = add_approval_vote(CACHE, user_id, application_key, recommended_weight)
 
     onchain_message = (
         "Multisig is now adding this module onchain, it will soon start getting votes."
@@ -187,12 +200,19 @@ async def approve(
     )
 
     await ctx.respond(
-        f"Nominator {ctx.author.mention} accepted module `{module_key}`.\n"
+        f"Nominator {ctx.author.mention} accepted module `{application_key}`.\n"
         f"This is the `{agreement_count}` agreement out of `{threshold}` threshold.\n"
         f"{onchain_message}"
     )
     if agreement_count >= threshold:
-        await push_to_white_list(CACHE, module_key)
+        await push_to_white_list(CACHE, application_key)
+        CACHE.app_being_voted = None
+        CACHE.app_being_voted_age = 0
+        overwrites = {
+        guild.default_role: discord.PermissionOverwrite(read_messages=False),
+        discord_user: discord.PermissionOverwrite(read_messages=False, send_messages=False)
+        }
+        await ctx.channel.edit(overwrites=overwrites) # type: ignore I HATE pycord
     CACHE.save_to_disk()
 
 @BOT.slash_command(
@@ -216,10 +236,20 @@ async def reject(ctx: discord.ApplicationContext, module_id: int, reason: str) -
     await ctx.respond(
         f"{ctx.author.mention} is rejecting the module `{module_id}` for the reason: `{reason}`."
     )
-
+    guild = ctx.guild
+    assert guild
+    discord_user = guild.get_member(int(CACHE.applicator_discord_id))
     threshold = get_votes_threshold(ctx)
     if rejection_count >= threshold:
         refuse_dao_application(module_id)
+        CACHE.app_being_voted = None
+        CACHE.app_being_voted_age = 0
+        overwrites = {
+        guild.default_role: discord.PermissionOverwrite(read_messages=False),
+        discord_user: discord.PermissionOverwrite(read_messages=False, send_messages=False)
+        }
+        await ctx.channel.edit(overwrites=overwrites) # type: ignore I HATE pycord
+
 
     CACHE.save_to_disk()
 

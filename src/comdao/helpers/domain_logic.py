@@ -10,9 +10,10 @@ from communex.types import Ss58Address
 from communex.key import is_ss58_address
 from substrateinterface import Keypair
 from typeguard import check_type
+import asyncio
 
 from ..db.cache import Cache, NominationVote
-from ..config.settings import MNEMONIC, ROLE_NAME, MAXIMUM_VOTING_AGE, ROLE_ID
+from ..config.settings import MNEMONIC, MAXIMUM_VOTING_AGE, ROLE_ID, BOT, DISCORD_PARAMS
 from ..config.application import Application
 from .substrate_interface import send_call
 from .substrate_interface import get_applications
@@ -32,27 +33,39 @@ class SizedIterable(Protocol[T]):
 RENDERED_APPLICATIONS_QUEUE = Queue[tuple[Application, str]]()
 APP_BEING_VOTED = None
 
-def to_markdown(app_obj: Application, guild: discord.Guild, cid: str):
+def to_markdown(app_obj_tupl: tuple[Application, str], guild: discord.Guild):
    
+    app_obj, cid = app_obj_tupl
     applicant = app_obj.discord_id
     data = app_obj.body
     key = app_obj.app_key
     member = guild.get_member(int(applicant)) # type: ignore
-    applicant = member.name if member else str(applicant) + " (ID)"
-    
+    applicant = member.mention if member else str(applicant) + " (ID)"
+    app_id = app_obj.app_id
     unescaped_data = data.replace('\\n', '\n')
+    if unescaped_data:
+        # removes trailling quotes of json
+        if unescaped_data[0] == '"':
+            unescaped_data = unescaped_data[1:]
+        if unescaped_data[-1] == '"':
+            unescaped_data = unescaped_data[:-1]
     single_mark = (
-        f"Application key: **{key}**\n"
-        f"Applicant: User **{applicant}**\n"
-        f"Data: \n{unescaped_data}"
+        "> **New application!**\n"
+        f"> Application key: **{key}**\n"
+        f"> Applicant: User **{applicant}**\n"
+        f"> Application ID: **{app_id}**\n"
+        f"> Data: \n{unescaped_data}\n"
+        "- - -"
     )
-    if len(single_mark) > 1024:
+    if len(single_mark) > 4000:
         new_data = f"Too large to display. You can [query the data via IPFS](https://ipfs.io/ipfs/{cid}) to see the full proposal."
         single_mark = (
-        f"Application key: **{key}**\n"
-        f"Applicant: User **{applicant}**\n"
-        f"Data: {new_data}"
-        )
+        "> **New application!**\n"
+        f"> Application key: **{key}**\n"
+        f"> Applicant: User **{applicant}**\n"
+        f"> Data: {new_data}\n"
+        "- - -"
+    )
     return single_mark
 
 
@@ -108,6 +121,17 @@ def build_application_embeds(cache: Cache, guild: discord.Guild):
                 "the voting took too long"
             )
             print(reffusal_message)
+            discord_user = cache.applicator_discord_id
+            if discord_user:
+                channel_id = DISCORD_PARAMS.REQUEST_CHANNEL_ID
+                channel = asyncio.run(BOT.fetch_channel(channel_id))  # as integer
+                channel = check_type(channel, discord.channel.TextChannel)
+                overwrites = {
+                guild.default_role: discord.PermissionOverwrite(read_messages=False),
+                discord_user: discord.PermissionOverwrite(read_messages=False, send_messages=False)
+                }
+                asyncio.run(channel.edit(overwrites=overwrites)) # type: ignore I HATE pycord
+
             cache.render_applications_queue.append(cache.app_being_voted)
             cache.app_being_voted = None
             cache.app_being_voted_age = time()
@@ -118,10 +142,12 @@ def build_application_embeds(cache: Cache, guild: discord.Guild):
             cache.app_being_voted = cache.render_applications_queue.pop(0)
             cache.app_being_voted_age = time()
             being_voted = cast(tuple[Application, str], cache.app_being_voted)
-            markdown = to_markdown_list([being_voted], guild)
-            return markdown
+            discord_user_id = being_voted[0].discord_id
+            markdown = to_markdown(being_voted, guild)
+            cache.applicator_discord_id = discord_user_id
+            return markdown, discord_user_id
         else:
-            return []
+            return "", None
 
 
 def get_new_pending_applications(cache: Cache):
