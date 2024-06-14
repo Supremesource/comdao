@@ -94,7 +94,8 @@ async def show_pending_applications():
         discord_user = guild.get_member(int(discord_uid))
         overwrites = {
         guild.default_role: discord.PermissionOverwrite(read_messages=False),
-        discord_user: discord.PermissionOverwrite(read_messages=True, send_messages=True)
+        discord_user: discord.PermissionOverwrite(read_messages=True, send_messages=True),
+        role: discord.PermissionOverwrite(read_messages=True, send_messages=True),
         }
         if discord_user is not None:
             await channel.edit(overwrites=overwrites) # type: ignore I HATE pycord
@@ -190,6 +191,8 @@ async def approve(
     
     guild = ctx.guild
     assert guild
+    role = guild.get_role(ROLE_ID)
+    role = check_type(role, discord.Role)
     discord_user = guild.get_member(int(CACHE.applicator_discord_id))
     agreement_count = add_approval_vote(CACHE, user_id, application_key, recommended_weight)
 
@@ -210,7 +213,9 @@ async def approve(
         CACHE.app_being_voted_age = 0
         overwrites = {
         guild.default_role: discord.PermissionOverwrite(read_messages=False),
-        discord_user: discord.PermissionOverwrite(read_messages=False, send_messages=False)
+        discord_user: discord.PermissionOverwrite(read_messages=False, send_messages=False),
+        role: discord.PermissionOverwrite(read_messages=True, send_messages=True),
+
         }
         await ctx.channel.edit(overwrites=overwrites) # type: ignore I HATE pycord
     CACHE.save_to_disk()
@@ -238,6 +243,8 @@ async def reject(ctx: discord.ApplicationContext, module_id: int, reason: str) -
     )
     guild = ctx.guild
     assert guild
+    role = guild.get_role(ROLE_ID)
+    role = check_type(role, discord.Role)
     discord_user = guild.get_member(int(CACHE.applicator_discord_id))
     threshold = get_votes_threshold(ctx)
     if rejection_count >= threshold:
@@ -246,7 +253,8 @@ async def reject(ctx: discord.ApplicationContext, module_id: int, reason: str) -
         CACHE.app_being_voted_age = 0
         overwrites = {
         guild.default_role: discord.PermissionOverwrite(read_messages=False),
-        discord_user: discord.PermissionOverwrite(read_messages=False, send_messages=False)
+        discord_user: discord.PermissionOverwrite(read_messages=False, send_messages=False),
+        role: discord.PermissionOverwrite(read_messages=True, send_messages=True),
         }
         await ctx.channel.edit(overwrites=overwrites) # type: ignore I HATE pycord
 
