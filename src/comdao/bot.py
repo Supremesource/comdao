@@ -166,11 +166,10 @@ async def stats(ctx: discord.ApplicationContext) -> None:
 @in_nominator_channel()
 async def approve(
     ctx: discord.ApplicationContext, 
-    application_id: int,
+    application_id: Option(int, description="The ID of the application"),
     recommended_weight: Option(int, description="Between 1 and 100"),
     ) -> None:
     # Validate and sanitize the module_key input
-    recommended_weight = cast(recommended_weight, int)
     if recommended_weight <= 0 or recommended_weight > 100:
         await ctx.respond(
             "Invalid recommended weight. It should be a value between 1 and 100.", 
@@ -228,7 +227,11 @@ async def approve(
 @commands.has_role(ROLE_ID)
 @commands.cooldown(1, 60, commands.BucketType.user)
 @in_nominator_channel()
-async def reject(ctx: discord.ApplicationContext, module_id: int, reason: str) -> None:
+async def reject(
+    ctx: discord.ApplicationContext, 
+    module_id: Option(int, description="The id of the application"), 
+    reason: Option(str, description="The reason of the reffusal"),
+    ) -> None:
     # Validate and sanitize the module_key input
     valid = await valid_for_rejection(ctx, CACHE, module_id, reason)
     if not valid:
