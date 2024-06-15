@@ -1,10 +1,12 @@
 import asyncio
 import html
 from functools import wraps
-from typing import Any
+from typing import Any, cast
 
 import discord
 from discord.ext import tasks
+from discord import Option
+
 # for valid url
 from typeguard import check_type
 from communex.key import is_ss58_address
@@ -152,21 +154,23 @@ async def stats(ctx: discord.ApplicationContext) -> None:
     await ctx.respond(f"```\n{table}\n```", ephemeral=True)
 
 
+
 @BOT.slash_command(
     guild_ids=[GUILD_ID],  # ! make sure to pass as string
     description="Approves module to a whitelist.",
     manage_roles=True,
     name="approve",
 )
-@commands.has_role(ROLE_NAME)
+@commands.has_role(ROLE_ID)
 @commands.cooldown(1, 60, commands.BucketType.user)
 @in_nominator_channel()
 async def approve(
     ctx: discord.ApplicationContext, 
     application_id: int,
-    recommended_weight: int,
+    recommended_weight: Option(int, description="Between 1 and 100"),
     ) -> None:
     # Validate and sanitize the module_key input
+    recommended_weight = cast(recommended_weight, int)
     if recommended_weight <= 0 or recommended_weight > 100:
         await ctx.respond(
             "Invalid recommended weight. It should be a value between 1 and 100.", 
@@ -221,7 +225,7 @@ async def approve(
     manage_roles=True,
     name="reject"
 )
-@commands.has_role(ROLE_NAME)
+@commands.has_role(ROLE_ID)
 @commands.cooldown(1, 60, commands.BucketType.user)
 @in_nominator_channel()
 async def reject(ctx: discord.ApplicationContext, module_id: int, reason: str) -> None:
@@ -260,7 +264,7 @@ async def reject(ctx: discord.ApplicationContext, module_id: int, reason: str) -
     manage_roles=True,
     name="remove"
 )
-@commands.has_role(ROLE_NAME)
+@commands.has_role(ROLE_ID)
 @commands.cooldown(1, 60, commands.BucketType.user)
 @in_nominator_channel()
 async def remove(ctx: discord.ApplicationContext, module_key: str, reason: str) -> None:
