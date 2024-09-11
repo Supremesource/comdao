@@ -15,6 +15,7 @@
           nativeBuildInputs = with pkgs; [
             direnv
             poetry
+            dbmate
           ];
           shellHook = ''
             export PATH=$PWD/.venv/bin:$PATH
