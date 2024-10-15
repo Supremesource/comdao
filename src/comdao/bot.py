@@ -36,7 +36,6 @@ async def verify_token(x_token: str = Header(...)):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     print("Starting...")
-    # ihatepythonihatepythonihatepythonihatepythonihatepythonihatepython
     asyncio.create_task(BOT.start(BOT_TOKEN))
     # gambiarra to wait for the bot connection
     await asyncio.sleep(5)
@@ -51,7 +50,7 @@ async def on_ready() -> None:
 
 
 class ApplicationNotification(BaseModel):
-    discord_uid: int
+    discord_uid: str
     application_url: str
     app_id: str
 
@@ -76,14 +75,18 @@ async def notify_new_application(notification: ApplicationNotification):
 
     embed.add_field(name="Application URL",
                     value=f"[Click here to view the application]({notification.application_url})", inline=False)
-    embed.add_field(name="Applicant", value=discord_user.mention, inline=False)
+    if discord_user is not None:
+        user_v = discord_user.mention
+    else:
+        user_v = "User is not on the channel"
+    embed.add_field(name="Applicant", value=user_v, inline=False)
     embed.add_field(name="Application ID",
                     value=notification.app_id, inline=False)
 
     embed.set_footer(
         text="Please review and discuss the application on our website.")
     mention = f"<@&{ROLE_ID}>"
-    embed.set_thumbnail(url="https://i.imgur.com/U9izm50.png")
+    embed.set_thumbnail(url="https://i.imgur.com/6hJKhMu.gif")
     await channel.send(content=mention, embed=embed)
     return {"message": "Application notification sent successfully"}
 
