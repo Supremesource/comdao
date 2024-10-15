@@ -10,10 +10,10 @@ from communex._common import get_node_url
 
 class DiscordParams(BaseSettings):
     BOT_TOKEN: str
-    GUILD_ID: int
-    REQUEST_CHANNEL_ID: int
-    NOMINATOR_CHANNEL_ID: int
-    ROLE_ID: int
+    GUILD_ID: str
+    REQUEST_CHANNEL_ID: str
+    NOMINATOR_CHANNEL_ID: str
+    ROLE_ID: str
 
     class Config:
         env_prefix = "DISCORD_"
